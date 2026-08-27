@@ -13,8 +13,9 @@
 // geometry per game: a slotted Connect Four frame, a chequered
 // Breakthrough field, a Hex rhombus with seat-coloured edge pairs, and a
 // Quoridor lattice with grooved wall channels. Under the board sits a
-// RESERVED say band, two lines high, sized from MaxSayLen at the current
-// scale so a full-cap line can never be laid out at a negative coordinate.
+// RESERVED say band, sized from MaxSayLen measured in the render font at
+// the current width, so a full-cap line WRAPS onto as many lines as it
+// needs and is never cut to fit or laid out at a negative coordinate.
 //
 // It draws state objects and derives nothing:
 //   {board_game, rotated, size, walls, board[], hWalls[], vWalls[],
@@ -120,15 +121,21 @@
 
   // ---- Layout --------------------------------------------------------------
 
-  function layoutOf(w, h, state) {
+  function layoutOf(ctx, w, h, state) {
     var cols = boardCols(state);
     var rows = boardRows(state);
     var scale = Math.max(0.6, Math.min(w / 1280, 1));
     var lineH = Math.max(11, Math.round(15 * scale));
     // The say band is RESERVED whether or not a seat has spoken: `say`
     // arrives without warning and a band that appears late reflows the
-    // board mid-playback.
-    var sayBand = lineH * 2 + Math.round(12 * scale);
+    // board mid-playback. Its height comes from the CAP, measured in the
+    // render font at this width: MAX_SAY_LEN runes wrapped over as many
+    // lines as they need, per seat. A remark is never cut to fit.
+    var sayPad = Math.max(8, Math.round(10 * scale));
+    var sayWidth = Math.max(40, w - sayPad * 2);
+    var sayFont = sayFontOf(lineH);
+    var sayRows = sayRowsOf(ctx, sayFont, sayWidth, state);
+    var sayBand = sayRows * 2 * lineH + Math.round(12 * scale);
     var pad = Math.max(14, Math.round(22 * scale));
     var availW = Math.max(40, w - pad * 2);
     var availH = Math.max(40, h - sayBand - pad * 2);
@@ -148,6 +155,10 @@
       lineH: lineH,
       sayTop: h - sayBand,
       sayBand: sayBand,
+      sayRows: sayRows,
+      sayPad: sayPad,
+      sayWidth: sayWidth,
+      sayFont: sayFont,
       ox: (w - boardW) / 2,
       oy: pad + (availH - boardH) / 2,
       w: w,
@@ -466,32 +477,108 @@
   }
 
   // ---- The say band --------------------------------------------------------
+  //
+  // A remark is model-authored prose, and prose that does not fit is WRAPPED,
+  // never ellipsized: an ellipsis is a label affordance (a name in a plate)
+  // and a defect on a sentence. The band's height is therefore measured from
+  // the CAP -- MAX_SAY_LEN runes of the widest glyph the schema admits, in
+  // the render font, at this canvas width -- so a full-cap line on both seats
+  // has room reserved for it whether or not anyone is speaking.
+
+  function sayFontOf(lineH) {
+    return Math.max(10, Math.round(lineH * 0.78)) + "px " + HUD_FONT;
+  }
+
+  // The worst case the cap admits: a clamped name plus MAX_SAY_LEN runes,
+  // all full-width, which is the widest a rune gets in the render font.
+  var CAP_RULER = (function () {
+    var wide = "";
+    var i;
+    for (i = 0; i < 24 + MAX_SAY_LEN; i++) wide += "\u65E5";
+    return wide + ": \u201C\u201D";
+  })();
+
+  // Greedy wrap in the ctx's CURRENT font. Nothing is dropped: a run with no
+  // break opportunity (CJK, a long unbroken word) is split between runes.
+  function wrapRunes(ctx, text, width) {
+    var runes = Array.from(String(text));
+    var lines = [];
+    var line = "";
+    for (var i = 0; i < runes.length; i++) {
+      var rune = runes[i];
+      if (line && ctx.measureText(line + rune).width > width) {
+        var cut = line.lastIndexOf(" ");
+        if (cut > 0 && rune !== " ") {
+          lines.push(line.slice(0, cut));
+          line = line.slice(cut + 1) + rune;
+        } else {
+          lines.push(line);
+          line = rune === " " ? "" : rune;
+        }
+      } else {
+        line += rune;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.length ? lines : [""];
+  }
+
+  // Wrapping is measured per rune, and the frame loop redraws the same two
+  // remarks sixty times a second, so the result is memoised on font+width+text.
+  var wrapCache = {};
+  var wrapCacheSize = 0;
+
+  function wrapLines(ctx, text, width) {
+    var key = ctx.font + "|" + Math.round(width) + "|" + text;
+    if (wrapCache[key]) return wrapCache[key];
+    if (wrapCacheSize > 400) {
+      wrapCache = {};
+      wrapCacheSize = 0;
+    }
+    wrapCache[key] = wrapRunes(ctx, text, width);
+    wrapCacheSize += 1;
+    return wrapCache[key];
+  }
+
+  function sayString(state, seat) {
+    var info = (state.seats || [])[seat] || {};
+    var name = C.clampName(info.name || ("Seat " + seat));
+    var text = String(info.say || "").slice(0, MAX_SAY_LEN);
+    if (!text) return { spoken: false, text: name + " \u2014 \u00B7 \u00B7 \u00B7" };
+    return { spoken: true, text: name + ": \u201C" + text + "\u201D" };
+  }
+
+  // Rows RESERVED per seat: what the cap needs, and never fewer than what the
+  // current text needs, so a remark can neither be cut nor land outside.
+  function sayRowsOf(ctx, font, width, state) {
+    ctx.save();
+    ctx.font = font;
+    var rows = wrapLines(ctx, CAP_RULER, width).length;
+    for (var seat = 0; seat < 2; seat++) {
+      rows = Math.max(rows, wrapLines(ctx, sayString(state, seat).text,
+        width).length);
+    }
+    ctx.restore();
+    return rows;
+  }
 
   function drawSayBand(ctx, layout, state) {
-    var seats = state.seats || [];
-    var size = Math.max(10, Math.round(layout.lineH * 0.78));
     ctx.save();
-    ctx.font = size + "px " + HUD_FONT;
+    ctx.font = layout.sayFont;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    var pad = Math.max(8, Math.round(10 * layout.scale));
-    // The band is measured from the CAP, not from the current text, so a
-    // full 80-rune line is always laid out at the same positive baseline.
-    var width = Math.max(40, layout.w - pad * 2);
     for (var seat = 0; seat < 2; seat++) {
-      var info = seats[seat] || {};
-      var y = layout.sayTop + layout.lineH * (seat + 0.5) +
-        Math.round(6 * layout.scale);
-      var text = String(info.say || "").slice(0, MAX_SAY_LEN);
-      ctx.fillStyle = seat === 0 ? COLOR_HEX.red : COLOR_HEX.blue;
-      if (!text) {
-        ctx.fillStyle = "rgba(138, 127, 114, 0.55)";
-        text = C.clampName(info.name || ("Seat " + seat)) + " \u2014 \u00B7 \u00B7 \u00B7";
-      } else {
-        text = C.clampName(info.name || ("Seat " + seat)) + ": \u201C" +
-          text + "\u201D";
+      var said = sayString(state, seat);
+      var lines = wrapLines(ctx, said.text, layout.sayWidth);
+      ctx.fillStyle = said.spoken ?
+        (seat === 0 ? COLOR_HEX.red : COLOR_HEX.blue) :
+        "rgba(138, 127, 114, 0.55)";
+      for (var i = 0; i < lines.length; i++) {
+        var row = seat * layout.sayRows + i;
+        var y = layout.sayTop + layout.lineH * (row + 0.5) +
+          Math.round(6 * layout.scale);
+        ctx.fillText(lines[i], layout.sayPad, y);
       }
-      ctx.fillText(C.ellipsize(ctx, text, width), pad, y);
     }
     ctx.restore();
   }
@@ -502,7 +589,7 @@
     var w = canvas.width;
     var h = canvas.height;
     var state = view.state || {};
-    var layout = layoutOf(w, h, state);
+    var layout = layoutOf(ctx, w, h, state);
     drawSurface(ctx, w, h, images, layout);
     var wins = {};
     (state.winPath || []).forEach(function (name) {
