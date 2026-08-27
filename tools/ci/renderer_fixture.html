@@ -81,6 +81,8 @@
 
   var WIDTHS = [360, 640, 1280];
   var GAMES = ["connect-four", "breakthrough", "hex", "quoridor"];
+  // The reply schema's cap, from src/gauntlet/types.nim (MaxSayLen = 80).
+  var MAX_SAY_LEN = 80;
   // A full-cap say: 80 runes, the reply schema's exact limit, in multi-byte
   // characters so the band is measured on runes and not on bytes.
   function fullCapSay(lead) {
@@ -92,6 +94,20 @@
     fullCapSay("centre file, then count both diagonals — "),
     fullCapSay("their path is nine and mine is six, so I run — ")
   ];
+  // The fixture gates nothing if its own strings quietly shorten: a remark
+  // trimmed to fit would leave every widget passing while testing nothing
+  // (prompts/30-review-loop.md item 15, last bullet). Assert the cap here,
+  // loudly enough for viewer_smoke.mjs to fail the step: it reads
+  // data-replay-error, and the throw stops the page before it ever draws.
+  SAYS.forEach(function (say, seat) {
+    var runes = Array.from(say).length;
+    if (runes !== MAX_SAY_LEN) {
+      var message = "fixture say for seat " + seat + " is " + runes +
+        " runes, not the full cap of " + MAX_SAY_LEN;
+      document.documentElement.setAttribute("data-replay-error", message);
+      throw new Error(message);
+    }
+  });
   // The longest plausible policy names: the ladder shows the policy name
   // spectator-side and the anonymous alias underneath it.
   var POLICY_NAMES = ["board-gauntlet-grandmaster", "board-gauntlet-tempo"];
