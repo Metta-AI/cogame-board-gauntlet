@@ -1355,11 +1355,19 @@ only harness. `NIM_TESTS` is left unset — every `tests/*.nim` runs in both deb
     `viewer_smoke.mjs --url … --strict-text-bounds` run): CI replays carry **zero LLM text** —
     `docker_smoke.sh` runs without a key and the scripted baselines emit no `say` or `notes` — so
     nothing that plays a CI replay ever exercises the say band or the quoted feed lines. The fixture
-    loads the **shipped** `dist/static-replay-viewer/index.html` in an iframe, shims only the wasm
-    entry, feeds it a synthetic payload **for each of the four games** with a full-cap 80-rune `say`
-    on both seats and the longest plausible policy names, and drives the page's own text path at
-    **360, 640 and 1280 px** (particle-worlds `46cf69d`, 2026-08-26 — a fixture that re-implements
-    the drawing gates nothing).
+    loads the **shipped** bundle's own `chrome.css`, `chrome_common.js`, `renderer.js` and
+    `assets/` — it is copied **into** `dist/static-replay-viewer/` before it runs, so every relative
+    path resolves to the artifact CI is about to publish — shims only the wasm entry, feeds
+    `GauntletRenderer.attachReplay` a synthetic payload **for each of the four games** with a
+    full-cap 80-rune `say` on both seats and the longest plausible policy names, and drives the
+    page's own text path at **360, 640 and 1280 px** (particle-worlds `46cf69d`, 2026-08-26 — a
+    fixture that re-implements the drawing gates nothing). It asserts its own remarks are still
+    exactly `MaxSayLen` runes before it draws, and fails via `data-replay-error` if they are not.
+    It runs as the **top-level document**, not in an iframe: `viewer_smoke.mjs` installs its canvas
+    wrapper with an init script but reads the tally back with `page.evaluate()`, which only ever
+    runs in the main frame, so an iframe fixture would report zero canvas text and gate nothing.
+    It therefore retypes the shipped `index.html`'s markup (the same ids, in `#layout` / `#stage`)
+    rather than reusing that file.
 
 29. **Chrome scope check** (`tools/ci/chrome_scope_check.mjs`, same job): asserts that no identifier
     exported by `client/chrome_common.js` is re-declared as a top-level `function` or `var` in
