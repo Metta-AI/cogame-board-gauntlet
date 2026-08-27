@@ -1063,7 +1063,9 @@ pawns, and walls drawn as planks that snap into their groove.
 - **Feed** (`#feed`): one block per ply — `PLY 14 · SPROCKET`, then the move in words:
   `drops into d — lands on d3`, `b2 takes c3`, `plays c4`, `pawn to e5`, `wall at e3 (horizontal)`;
   then the quoted `say`. The `win` line reads `Sprocket connects a4–g4`, `Gizmo lines up d3-e4-f5-g6`,
-  `Sprocket breaks through on f6`, `Gizmo reaches rank 1`, or `Gizmo has no legal move`. The end
+  `Sprocket breaks through on f6`, `Gizmo reaches rank 1`, or — for a starved opponent —
+  `Gizmo wins: the opponent has no legal move`, phrased from the seat the `win` event names, which
+  is the **victor** (`sim.nim:300`), so every `win` line reads about the same seat. The end
   block names the reason and the ending in words (`complete — ply cap, adjudicated on position` /
   `deadline — stopped after 21 of 80 plies, adjudicated on position`).
 - **Endcard** (`#endscreen`): the verdict (`SPROCKET WINS` / `DRAWN`), a reason line, and one row
