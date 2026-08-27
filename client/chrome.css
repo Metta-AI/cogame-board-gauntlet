@@ -590,7 +590,12 @@ body.feed-collapsed #feed { display: none; }
 .feed-win { color: var(--amber); font-weight: 700; }
 .feed-start { color: var(--paper-dim); font-size: 11px; letter-spacing: 0.04em; }
 
-/* ---------- 640 px: the labels go ------------------------------------- */
+/* ---------- 640 px: the labels go -------------------------------------
+   Each block is written twice: once as a media query, and once keyed on a
+   body class. A page cannot resize the viewport it is loaded in, so
+   tools/ci/renderer_fixture.html narrows the stage in place and sets
+   `body.narrow-640` / `body.narrow-360`; CI then exercises the SHIPPED
+   rules rather than a copy of them. */
 @media (max-width: 640px) {
   .plate-label { display: none; }
   .plate-readout { font-size: 8px; letter-spacing: 0.06em; }
@@ -610,3 +615,22 @@ body.feed-collapsed #feed { display: none; }
   .plate-name { font-size: 12px; }
   .plate-score { font-size: 14px; }
 }
+
+body.narrow-640 .plate-label { display: none; }
+body.narrow-640 .plate-readout { font-size: 8px; letter-spacing: 0.06em; }
+body.narrow-640 #scorebug {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding: 3px 10px 6px;
+}
+body.narrow-640 #evalbar { height: 12px; }
+body.narrow-640 #clock { font-size: 12px; }
+body.narrow-640 #wordmark { font-size: 15px; }
+
+body.narrow-360 #feed { display: none; }
+body.narrow-360 .plate-cog { display: none; }
+body.narrow-360 .plate-alias { display: none; }
+body.narrow-360 #topband { padding: 6px 8px; gap: 6px; }
+body.narrow-360 #clock { font-size: 11px; letter-spacing: 0.04em; }
+body.narrow-360 .plate-name { font-size: 12px; }
+body.narrow-360 .plate-score { font-size: 14px; }

@@ -292,6 +292,8 @@
     // the media query keys off the VIEWPORT, which a page cannot resize, so
     // the fixture applies the same class the toggle would.
     document.body.classList.toggle("feed-collapsed", width <= 640);
+    document.body.classList.toggle("narrow-640", width <= 640);
+    document.body.classList.toggle("narrow-360", width <= 360);
     GauntletChrome.relayout();
     canvas.width = Math.max(80, canvas.clientWidth);
     canvas.height = Math.max(80, canvas.clientHeight);
