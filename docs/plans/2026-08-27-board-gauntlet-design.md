@@ -849,7 +849,7 @@ cap)` (babel's `cleanNotes`, generalised): `say` (80), `notes` (400), `move` (12
 prompt (4000), and any error text that reaches an event or the log (200). A byte-boundary cut is
 exactly how a replay renders in a browser but fails a strict JSON parser; `tests/test_replay.nim`
 pins it with multi-byte input at exactly the cap. Newlines in `say` are replaced by spaces (it is
-drawn on one line in a reserved band).
+drawn in a reserved band under the board, wrapped over as many lines as the cap needs).
 
 ### Replay bytes (self-sufficient)
 
@@ -1025,13 +1025,20 @@ pawns, and walls drawn as planks that snap into their groove.
   `GAUNTLET → QUORIDOR 9×9 · PLY 22 / 80 · FINAL`. The rotation arrow appears only when
   `config.rotated` is true.
 - **Scorebug** (`#scorebug`): one plate per seat — seat colour chip; `.plate-name` carrying the
-  **policy name** (spectator side) with the anonymous alias as a small sub-label; the per-game
-  readout (`TO CONNECT 3` / `PATH 6 · WALLS 7` / `PIECES 9 · ROW 4` / `THREATS 2`); and this ply's
-  `say` in a **reserved band** sized from `MaxSayLen = 80` measured in the render font at the
-  current `--hudscale`, so a full-cap line can never be laid out at a negative coordinate
-  (cogchemists, 2026-08-24). `.plate-name` gets `flex: 1 1 auto; min-width: 3.2em` and its label is
+  **policy name** (spectator side) with the anonymous alias as a small sub-label; and the per-game
+  readout (`TO CONNECT 3` / `PATH 6 · WALLS 7` / `PIECES 9 · ROW 4` / `THREATS 2`).
+  `.plate-name` gets `flex: 1 1 auto; min-width: 3.2em` and its label is
   hidden under 640 px — the featured-match iframe on softmax.com is ~360 px wide and names
   otherwise collapse to "…".
+- **Say band** (`canvas#table`, under the board): this ply's `say` for **both** seats, in a
+  **reserved band** whose height is measured from the cap — `MaxSayLen = 80` runes plus a clamped
+  name, wrapped in the render font at the current canvas width — so a full-cap line on both seats
+  has room reserved for it whether or not anyone is speaking, and can neither be laid out at a
+  negative coordinate nor cut to fit (cogchemists, 2026-08-24). A remark that does not fit on one
+  line **wraps** onto the next; it is never ellipsized, because an ellipsis is a label affordance
+  and a defect on a sentence (`prompts/30-review-loop.md` item 15). The band is drawn on the
+  canvas rather than in the plate because the canvas is what `viewer_smoke.mjs --strict-text-bounds`
+  instruments — a DOM remark is invisible to every gate that measures drawn text.
 - **Eval bar** (`#evalbar`, inside `#scorebug`): a horizontal bar with a centre tick, filled from
   the centre toward the leading seat by `evalBar(sim)`, captioned **`HEURISTIC`** in 8 px caps —
   it is this repo's own heuristic, not an engine, and the caption says so.
