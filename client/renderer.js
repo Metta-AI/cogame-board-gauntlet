@@ -855,9 +855,17 @@
     });
   }
 
+  // One replay driver at a time. attachReplay starts a self-scheduling
+  // frame loop, so a second call -- the fixture re-attaches per game and per
+  // width -- would leave the first loop running and both drawing onto the
+  // same canvas. Each call takes a generation and a stale loop stops.
+  var replayGeneration = 0;
+
   function attachReplay(options) {
     // options: {canvas, feed, scrub, playButton, label, clock, scorebug,
     //           endscreen, assetBase, payload, onFirstFrame}
+    replayGeneration += 1;
+    var generation = replayGeneration;
     var payload = options.payload;
     var events = payload.events || [];
     var states = payload.states || [];
@@ -873,6 +881,8 @@
     C.setEndColumns(endTable);
 
     makeRenderer(options.canvas, options.assetBase, function (renderer) {
+      // The images may land after a later attach has taken over.
+      if (generation !== replayGeneration) return;
       var scrub = C.buildScrub(options.scrub, events, function (next) {
         playing = false;
         setIndex(next, true);
@@ -910,6 +920,7 @@
       setIndex(0, true);
 
       (function frame(timestamp) {
+        if (generation !== replayGeneration) return;
         var shown = index > 0 ? events[index - 1] : null;
         var stepMs = DWELL_MOVE;
         if (shown && (shown.kind === "win" || shown.kind === "end")) {
