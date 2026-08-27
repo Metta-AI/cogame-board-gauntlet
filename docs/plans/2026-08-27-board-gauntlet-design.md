@@ -839,8 +839,12 @@ rule and the resolved game are all given to both seats every ply. That is the po
 
 `normalizeMove` is deliberately tolerant, and identically so in the validator and in the tests: the
 string is lower-cased, trimmed, and stripped of every character outside `a-z0-9`; then, per game —
-`connect-four`: the first character must be a file letter `a`..`g`, or a digit `1`..`7` mapping to
-`a`..`g`; anything after it is ignored (`"d"`, `"D"`, `"4"`, `"column d — centre"` all mean `d`).
+`connect-four`: the move is the **first standalone one-character token** that is a file letter
+`a`..`g` or a digit `1`..`7` mapping to `a`..`g`; every byte outside `a-z0-9` in the raw reply
+becomes a separator first, so multi-byte punctuation splits tokens instead of joining them, and a
+reply with no such token falls back to its first character (`"d"`, `"D"`, `"4"`,
+`"column d — centre"` all mean `d` — note that a literal *first character* rule would read that
+last one as the `c` of "column", which is why the rule is per token).
 `hex`: must match `^[a-g][1-7]$`. `breakthrough`: must match `^[a-f][1-6][a-f][1-6]$` after
 stripping (so `b2-c3`, `b2c3`, `b2 x c3` all mean `b2-c3`); the canonical form written to the event
 is `b2-c3`. `quoridor`: `^[a-i][1-9]$` is a pawn move, `^[a-h][1-8][hv]$` a wall. Anything else
