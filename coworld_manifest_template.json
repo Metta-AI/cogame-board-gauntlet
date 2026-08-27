@@ -1,0 +1,563 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "board-game",
+    "perfect-information",
+    "zero-sum",
+    "two-player",
+    "turn-based",
+    "llm-driven",
+    "openspiel-port",
+    "hex",
+    "connect-four",
+    "quoridor",
+    "breakthrough"
+  ],
+  "game": {
+    "name": "board-gauntlet",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Board Gauntlet is a rotating perfect-information ladder for two LLM-piloted cogs. Every episode plays ONE of four classic boards - Connect Four (7 files x 6 ranks), Breakthrough (6x6), Hex (7x7) or Quoridor (9x9 with ten walls a side) - drawn deterministically from the episode seed as RotationOrder[seed mod 4] and ANNOUNCED to both seats before their first move, so a policy that only knows one opening book scores in one episode of four. Nothing is hidden: both seats are given the whole board, the whole move history, both position heuristics and the complete legal-move set every ply; the only thing either cannot see is what the other is thinking. Seats alternate strictly, one move each, and the game is zero-sum: +1 for a win, 0 for a draw, -1 for a loss, and the array always sums to zero. Seats play under anonymous cog aliases so no policy can be recognised at the board. The game is LLM-driven: the server sends the acting seat's policy prompt plus its whole observation to Claude, so A POLICY IS JUST A PROMPT - field one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable to your strategy. Two scripted baselines, `tactician` (wins now, blocks an immediate loss, then maximises the position differential) and `hustler` (never defends, maximises its own progress), play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{BOARD_GAUNTLET_IMAGE}}",
+      "run": [
+        "/bin/board-gauntlet"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/board-gauntlet/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-board-gauntlet/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot. Injected by the runner; never present in a variant or the certification fixture.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Every shipped board is two-sided and zero-sum, so this is exactly 2.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 2
+        },
+        "game": {
+          "description": "Which board to play. `rotate` draws one deterministically from the seed as RotationOrder[seed mod 4] and announces it to both seats before the first move.",
+          "type": "string",
+          "enum": [
+            "rotate",
+            "connect-four",
+            "breakthrough",
+            "hex",
+            "quoridor"
+          ],
+          "default": "rotate"
+        },
+        "size": {
+          "description": "Board side. connect-four is size files by size-1 ranks; the others are square. Legal ranges are per game (connect-four 5-9, breakthrough 4-8 and even, hex 4-11, quoridor 5-11 and odd); under `rotate` a size the drawn game cannot use is snapped to that game's default.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 11,
+          "default": 7
+        },
+        "walls": {
+          "description": "Quoridor walls per seat; ignored elsewhere.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 10
+        },
+        "first": {
+          "description": "The seat that moves on ply 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "maxPlies": {
+          "description": "Ply cap. A game that reaches it with no terminal position is adjudicated on `standing`. Clamped to what the board can absorb.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 200,
+          "default": 80
+        },
+        "seed": {
+          "description": "Pins the rotation draw and the seat aliases. 0 means draw one per episode; the server echoes the drawn seed and records it in the replay.",
+          "type": "integer"
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall clock the game assumes the platform allows when COWORLD_TIMEOUT_SECONDS is not in its environment. Play stops between plies at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "plySpacingSeconds": {
+          "description": "Minimum seconds between the starts of two LLM-driven plies (the hosted sidecar's rate floor). 0 derives 4.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60,
+          "default": 0
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between plies.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 250
+        },
+        "model": {
+          "description": "Claude model that drives every LLM seat.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "description": "The idea's time-control-per-move lever, pinned at 30 s in every variant so the ladder compares like with like.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "outcome",
+        "game",
+        "rotated",
+        "size",
+        "walls",
+        "first",
+        "seed",
+        "winner",
+        "plies",
+        "maxPlies",
+        "standing",
+        "captures",
+        "wallsUsed",
+        "illegalReplies",
+        "fallbacks",
+        "ending",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "+1 for a win, 0 for a draw, -1 for a loss. The array always sums to zero.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "outcome": {
+          "description": "1 / 0.5 / 0 per seat.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "game": {
+          "description": "The RESOLVED board; never `rotate`, because results always carry the game that was played.",
+          "type": "string",
+          "enum": [
+            "connect-four",
+            "breakthrough",
+            "hex",
+            "quoridor"
+          ]
+        },
+        "rotated": {
+          "description": "True when the rotation resolved the game.",
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 11
+        },
+        "walls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "first": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "winner": {
+          "description": "The winning seat, or -1 on a draw.",
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "plies": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxPlies": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 200
+        },
+        "standing": {
+          "description": "The final position heuristic per seat, on the true board. Reported, never scored.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "captures": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "wallsUsed": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "illegalReplies": {
+          "description": "Replies that parsed but did not name a legal move.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "fallbacks": {
+          "description": "Plies decided by the tactician baseline after an LLM decision failed.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "ending": {
+          "description": "The finer ending; see rules.md.",
+          "type": "string",
+          "enum": [
+            "line",
+            "board-full",
+            "home-rank",
+            "no-pieces",
+            "no-moves",
+            "connection",
+            "goal-row",
+            "ply-cap",
+            "wall-clock"
+          ]
+        },
+        "reason": {
+          "description": "complete (the game ended by its own rules or the ply cap) or deadline (the play clock stopped it between plies; the position is still fully scored by `standing`).",
+          "type": "string",
+          "enum": [
+            "complete",
+            "deadline"
+          ]
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "gauntlet.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Board Gauntlet policy is a prompt: the player container's only job is to deliver it, and the game server makes every decision by sending that prompt plus the acting seat's whole observation (the resolved game and its rules, the board as a labelled ASCII diagram, the full move history, both seats' position heuristics and the complete legal-move set) to Claude. This is an ALTERNATING turn-based game: exactly one seat decides per ply. game->player frames: {\"type\":\"welcome\",\"protocol\":\"gauntlet.player.v1\",\"slot\":N,\"name\":\"<alias>\",\"seats\":2,\"game\":\"hex\",\"rotated\":true,\"size\":7,\"walls\":0,\"first\":0,\"maxPlies\":49} on connect; {\"type\":\"state\",\"slot\":N,\"name\":\"<alias>\",\"game\":\"hex\",\"ply\":p,\"maxPlies\":M,\"seat\":{\"score\":f,\"standing\":s,\"captures\":k,\"wallsLeft\":w,\"fallbacks\":n},\"toMove\":bool,\"started\":b,\"done\":b,\"reason\":s,\"ending\":s} after every event, redacted to the seat's own tallies (decisions are server-side, so this loses the policy nothing and leaves no wire on which two seats could coordinate); {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[...],\"outcome\":[...],\"names\":[<aliases>],\"game\":\"hex\",\"plies\":k,\"reason\":s,\"ending\":s} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":\"tactician\"|\"hustler\"|true|false} - send it on connect and again after welcome (the first send can race slot registration); the latest frame wins; the prompt is capped at 4000 characters and truncated on a rune boundary. A policy is just a prompt: reuse the published board-gauntlet-player runnable with PLAYER_PROMPT, or PLAYER_SCRIPTED=tactician|hustler for a baseline, so a new policy is `coworld upload-policy` of the same image with --secret-env PLAYER_PROMPT=\"<your strategy>\"."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the whole snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"board-gauntlet\",\"board_game\":\"quoridor\",\"rotated\":true,\"size\":9,\"walls\":10,\"board\":[\"empty\",\"seat0\",...] (occupants, row-major from rank 1),\"hWalls\":[bool...],\"vWalls\":[bool...],\"pawns\":[36,76],\"wallsLeft\":[7,9],\"seats\":[{name, policy, standing, captures, wallsUsed, wallsLeft, score, say, notes, scripted, fellBack, readout} x2],\"mover\":0,\"ply\":14,\"maxPlies\":80,\"plies\":14,\"legalCount\":37,\"lastMove\":{\"seat\":0,\"move\":\"e3h\",\"mkind\":\"wall\",\"capture\":\"\"},\"eval\":0.18,\"winner\":-1,\"winPath\":[],\"phase\":\"moving\"|\"done\",\"gameDone\":false,\"reason\":\"\",\"ending\":\"\",\"policyNames\":[...],\"events\":[{kind:start|move|win|end,...}],\"started\":true,\"connected\":[bool,bool]}. `readout` is the one-line per-seat tension string the scorebug draws (TO CONNECT 3, PATH 6 / WALLS 7, PIECES 9 / ROW 4, THREATS 2). Moves and cells are ALGEBRAIC strings ('d', 'c4', 'b2-c3', 'e3h'), never indices. Three browser pages render it: /client/global is the spectator stage, /client/player is the seat's view, and /client/replay plays a recorded episode; hosted replays are served by the STATIC wasm bundle (index.html?replay=<url>), never by a pod."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Board Gauntlet is a rotating perfect-information ladder for two LLM-piloted cogs: one episode, one of four classic boards - Connect Four 7x6, Breakthrough 6x6, Hex 7x7, Quoridor 9x9 - drawn from the episode seed as RotationOrder[seed mod 4] and announced to both seats before their first move. Nothing about the position is hidden from either seat: the full board, the full move history, both position heuristics and the complete legal-move set go into every prompt. Seats alternate strictly; the game is zero-sum (+1 / 0 / -1) and the score array always sums to zero. A POLICY IS JUST A PROMPT: field one by reusing the published board-gauntlet-player runnable with the PLAYER_PROMPT environment variable set to your strategy. Set PLAYER_SCRIPTED=tactician or PLAYER_SCRIPTED=hustler instead to play one of the two built-in baselines; those also play every seat when no LLM credentials are available, so episodes always complete. The rules of all four games, the coordinate scheme, the move notation, the `standing` heuristic and the ending table are in rules.md. The eval bar the replay viewer draws is this repository's own heuristic, not an engine evaluation, and the viewer says so."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Board Gauntlet rules\n\nTwo cogs, one board, no dice and nothing hidden. Both seats see the whole\nposition, the whole move history and the whole legal-move set. What varies\nis the board itself.\n\n## The rotation\n\n`config.game` is one of `rotate`, `connect-four`, `breakthrough`, `hex`,\n`quoridor`. The rotation order is the fixed list\n`[\"connect-four\", \"breakthrough\", \"hex\", \"quoridor\"]`, indices 0..3. With\n`game: \"rotate\"` the server resolves `game = RotationOrder[((seed mod 4) + 4) mod 4]`\nbefore the first move and records the resolved id in the replay, in\n`results.game`, in the player `welcome` frame and in the first line of both\nseats' prompts. If `seed` is 0 (unpinned) the server draws one, echoes it and\nwrites it into the config, so every replay carries a concrete seed and\nre-derives exactly. Nothing about the rotation is hidden from a seat, and\nbecause the draw is a pure function of the recorded seed nobody can be\nsteered into a game either.\n\n## Coordinates\n\nCells are algebraic: files `a`, `b`, `c`, ... left to right; ranks `1`, `2`,\n`3`, ... bottom to top. `a1` is bottom-left. Nothing spectator-facing ever\nshows an internal index. Seat 0 always moves first; the league's round robin\nseats each policy in both slots, which balances the opening advantage without\na swap rule.\n\n## connect-four (7 files x 6 ranks)\n\nSeat 0 plays red discs, seat 1 blue.\n\n1. A move is a file letter `a`..`g`. It is legal iff that file has at least\n   one empty cell.\n2. Applying it drops the mover's disc into the lowest empty cell of that file.\n3. The mover wins immediately if the placed disc completes a line of four of\n   its own discs horizontally, vertically or on either diagonal.\n4. If after the move every cell is occupied and nobody has four in a row, the\n   game is a draw (`ending = \"board-full\"`).\n5. There is no other way for this game to end other than the ply cap or the\n   wall clock.\n\n## breakthrough (6 x 6)\n\nSeat 0 is red, with 12 pieces filling ranks 1 and 2; seat 1 is blue, with 12\nfilling ranks 5 and 6. Red advances toward rank 6, blue toward rank 1.\n\n1. A move is `<from><to>`, e.g. `b2-c3`. `from` must hold one of the mover's\n   pieces; `to` must be one rank forward of `from` and on the same file or one\n   file to either side.\n2. A straight-forward move is legal only onto an empty cell. There is no\n   straight capture.\n3. A diagonal-forward move is legal onto an empty cell or onto a cell holding\n   an opponent piece, which is then removed.\n4. The mover wins immediately if the moved piece lands on the opponent's home\n   rank (`ending = \"home-rank\"`).\n5. The mover wins immediately if that move removed the opponent's last piece\n   (`ending = \"no-pieces\"`).\n6. If the seat now to move has no legal move, it loses (`ending = \"no-moves\"`).\n7. There are no draws by rule; the ply cap and the wall clock adjudicate.\n\n## hex (7 x 7 rhombus)\n\nSeat 0 is red, seat 1 blue.\n\n1. Cell (r, c) is adjacent to (r, c-1), (r, c+1), (r-1, c), (r+1, c),\n   (r-1, c+1) and (r+1, c-1). So `c4` touches `b4, d4, c3, c5, b5, d3`, and the\n   corner `a1` touches only `b1, a2`.\n2. A move is a cell name. It is legal iff the cell is empty.\n3. Applying it places the mover's stone there; stones never move and are never\n   removed.\n4. Seat 0 connects the left file (`a`) to the right file (`g`); seat 1 connects\n   the bottom rank (`1`) to the top rank (`7`). The mover wins immediately when\n   its own stones form an unbroken adjacency chain between its two edges\n   (`ending = \"connection\"`).\n5. Hex has no draws: a full board contains exactly one winning connection.\n   There is no swap (pie) rule.\n\n## quoridor (9 x 9, 10 walls a side)\n\nSeat 0's pawn starts on `e1` and must reach rank 9; seat 1's pawn starts on\n`e9` and must reach rank 1. Each seat holds 10 walls.\n\n1. A move is either a pawn move (the destination cell, e.g. `e2`) or a wall\n   placement, `<anchor><h|v>` with `anchor` in `a1`..`h8`, e.g. `e3h`.\n2. A wall's anchor names the lattice point at the top-right corner of the\n   anchor cell: `xNh` blocks the two vertical steps (x,N)<->(x,N+1) and\n   (x+1,N)<->(x+1,N+1); `xNv` blocks the two horizontal steps (x,N)<->(x+1,N)\n   and (x,N+1)<->(x+1,N+1).\n3. A wall placement is legal iff all of: the mover has walls left; no wall of\n   either orientation already sits on that anchor; neither of the two steps it\n   blocks is already blocked; and, after the placement, both pawns still have\n   some path to their own goal rank.\n4. A pawn moves to an orthogonally adjacent cell when that step is not\n   wall-blocked and the cell is empty. If the adjacent cell in direction d\n   holds the opponent pawn, the mover may jump straight over to the next cell\n   in direction d when that cell is on the board and the step from the\n   opponent's cell in direction d is not wall-blocked; if and only if that\n   straight jump is unavailable, the mover may instead move to either cell\n   diagonally adjacent to the opponent pawn, perpendicular to d, provided that\n   step is not wall-blocked and the cell is on the board.\n5. The mover wins immediately on moving its pawn onto any cell of its own goal\n   rank (`ending = \"goal-row\"`).\n6. Rule 3's path invariant guarantees a pawn always has a legal move, so\n   `no-moves` is unreachable here.\n\n## Move notation, tolerantly read\n\nA reply's `move` is lower-cased, trimmed and stripped of every character\noutside `a-z0-9`, then read per game: `connect-four` takes a file letter\n`a`..`g` or a digit `1`..`7` mapping to `a`..`g`; `hex` takes `^[a-g][1-7]$`;\n`breakthrough` takes `^[a-f][1-6][a-f][1-6]$` and writes `b2-c3`; `quoridor`\ntakes `^[a-i][1-9]$` for a pawn move and `^[a-h][1-8][hv]$` for a wall.\nAnything else is an invalid reply: the seat gets ONE retry carrying the\nprinted legal-move list, and then falls back to the `tactician` baseline.\n\n## `standing`, and the eval bar\n\n`standing(sim, seat)` is an integer, higher is better for that seat, computed\nfrom the true board and recomputed after every ply. It drives the viewer's\neval bar, it adjudicates the `ply-cap` and `wall-clock` endings, and the\n`tactician` baseline maximises it.\n\n- `connect-four`: over all 69 four-cell windows, sum `w[k]` for every window\n  that contains no opponent disc, where `k` is the mover's disc count in that\n  window and `w = [0, 1, 4, 16, 10000]`.\n- `breakthrough`: `100 x pieces + 10 x sum(advance) + 40 x max(advance)`.\n- `hex`: `1000 - 10 x distToWin`, where `distToWin` is a 0-1 BFS from the\n  seat's source edge to its target edge in which a cell the seat owns costs 0,\n  an empty cell costs 1 and an opponent cell is impassable; unreachable is 99.\n- `quoridor`: `1000 - 10 x dist + 2 x wallsLeft`, where `dist` is the BFS\n  pawn-step distance to the nearest cell of the goal rank over the\n  wall-blocked graph.\n\n**The eval bar is THIS repository's own heuristic, not an engine\nevaluation**, and the viewer labels it `HEURISTIC` in the bar's own caption.\nNo OpenSpiel, no external engine and no reference bot is used anywhere.\n\n## Scoring\n\n    score_i = +1  if seat i won\n               0  on a draw\n              -1  if seat i lost          score_0 + score_1 = 0, always\n\nHigher is better and the league ranks by mean episode `score`. Everything\nricher - captures, walls used, final `standing`, plies, fallbacks - is\nreported for the audience and the audit and is deliberately NOT scored, so no\npolicy can farm the metric instead of winning.\n\n## Who won, by ending\n\n| `ending` | Winner |\n|---|---|\n| `line` | the seat that completed four in a row |\n| `connection` | the seat that linked its two edges |\n| `home-rank` | the seat whose piece reached the opponent's home rank |\n| `no-pieces` | the seat that took the last enemy piece |\n| `no-moves` | the seat NOT to move (the starved seat loses) |\n| `goal-row` | the seat whose pawn reached its goal rank |\n| `board-full` | draw (Connect Four only) |\n| `ply-cap` | higher final `standing`; equal -> draw |\n| `wall-clock` | higher final `standing`; equal -> draw |\n\n`results.reason` has exactly two legal values, `\"complete\"` and\n`\"deadline\"`; the finer ending rides in `results.ending`. A `deadline` result\nis a REAL result: the position is fully scored by `standing` at the stop.\n\n## Anti-collusion\n\nTwo seats, zero-sum, so there is no coalition to form. The rotation is\nannounced to both seats before move one and is a pure function of the recorded\nseed. Seats play under anonymous cog aliases; no prompt, no player frame and\nno in-game text ever contains a policy display name. `say` is\nspectator-facing only and is never shown to the opponent; `notes` are private\nand fed back only to their author; every decision is made inside the game\nserver from a view the server builds, so there is no wire on which two seats\ncould coordinate.\n"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "board-gauntlet-player",
+      "name": "Board Gauntlet Prompt Player",
+      "type": "player",
+      "description": "The reference Board Gauntlet policy: delivers its PLAYER_PROMPT (or a default play-to-win strategy) to the game and spectates until the final frame. Every decision is made server-side by Claude from that prompt plus the seat's whole observation. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{BOARD_GAUNTLET_IMAGE}}",
+      "run": [
+        "/bin/board-gauntlet-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-board-gauntlet/tree/main"
+    },
+    {
+      "id": "board-gauntlet-scripted",
+      "name": "Board Gauntlet Tactician",
+      "type": "player",
+      "description": "The scripted tactician baseline as a fieldable policy: wins on the spot when it can, refuses moves that hand the opponent an immediate win, and otherwise maximises the position differential. It registers its seat as rule-based so the game server plays it deterministically, no LLM involved. Set PLAYER_SCRIPTED=hustler for the other baseline, which never defends.",
+      "image": "{{BOARD_GAUNTLET_IMAGE}}",
+      "run": [
+        "/bin/board-gauntlet-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "tactician"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-board-gauntlet/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "gauntlet",
+      "name": "The Gauntlet - rotating board",
+      "description": "The headline variant: the board is drawn from the episode seed as RotationOrder[seed mod 4] and announced to both seats before move one, so a policy has to be good at all four games rather than at one opening book.",
+      "game_config": {
+        "game": "rotate",
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          }
+        ],
+        "num_agents": 2,
+        "size": 7,
+        "walls": 10,
+        "first": 0,
+        "maxPlies": 80,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "connect-four",
+      "name": "Connect Four - 7x6",
+      "description": "Seven files, six ranks, four in a row. A drop game: short, sharp, and the one board where a double threat ends it.",
+      "game_config": {
+        "game": "connect-four",
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          }
+        ],
+        "num_agents": 2,
+        "size": 7,
+        "walls": 0,
+        "first": 0,
+        "maxPlies": 42,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "breakthrough-6",
+      "name": "Breakthrough - 6x6",
+      "description": "Twelve pieces a side on a 6x6 field. Straight steps do not capture and diagonal ones do; reach the far home rank, or take the last enemy piece, and it is over.",
+      "game_config": {
+        "game": "breakthrough",
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          }
+        ],
+        "num_agents": 2,
+        "size": 6,
+        "walls": 0,
+        "first": 0,
+        "maxPlies": 80,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "hex-7",
+      "name": "Hex - 7x7",
+      "description": "A 7x7 rhombus. Red links the left file to the right, blue links the bottom rank to the top, stones never move, and a full board always contains exactly one winning connection.",
+      "game_config": {
+        "game": "hex",
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          }
+        ],
+        "num_agents": 2,
+        "size": 7,
+        "walls": 0,
+        "first": 0,
+        "maxPlies": 49,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "quoridor-9",
+      "name": "Quoridor - 9x9, 10 walls",
+      "description": "Two pawns racing to opposite ranks with ten walls each. A wall is legal only while BOTH pawns still have a route, so the maze never closes.",
+      "game_config": {
+        "game": "quoridor",
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          }
+        ],
+        "num_agents": 2,
+        "size": 9,
+        "walls": 10,
+        "first": 0,
+        "maxPlies": 80,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "episode_timeout_minutes": 20,
+  "certification": {
+    "game_config": {
+      "game": "breakthrough",
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        }
+      ],
+      "num_agents": 2,
+      "size": 6,
+      "walls": 0,
+      "first": 0,
+      "maxPlies": 80,
+      "seed": 23,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "board-gauntlet-player"
+      },
+      {
+        "player_id": "board-gauntlet-scripted"
+      }
+    ]
+  }
+}

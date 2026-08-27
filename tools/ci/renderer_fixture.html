@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Board Gauntlet — renderer fixture</title>
+<!--
+  RENDERER FIXTURE. CI replays carry ZERO LLM text: docker_smoke.sh runs
+  without an API key and the scripted baselines emit no `say` and no
+  `notes`, so nothing that plays a CI replay ever exercises the say band or
+  the quoted feed lines. This page does.
+
+  It loads the SHIPPED bundle's own chrome.css, chrome_common.js and
+  renderer.js (it is copied INTO dist/static-replay-viewer before it runs,
+  so every relative path resolves to the artifact CI is about to publish),
+  reuses the shipped index.html markup verbatim, and drives the shipped
+  GauntletRenderer.attachReplay. The ONLY thing it replaces is the wasm
+  entry: the payload is synthetic instead of coming out of the module. A
+  fixture that re-implements the drawing would gate nothing (particle-worlds
+  46cf69d, 2026-08-26).
+
+  It cycles all FOUR games at 360, 640 and 1280 px with a full-cap 80-rune
+  `say` on both seats and the longest plausible policy names, forever, so
+  `viewer_smoke.mjs --url ... --soak N --strict-text-bounds` sees a page
+  that keeps moving and measures every one of those strings.
+
+  DEVIATION, reported: the design note describes loading the shipped
+  index.html in an IFRAME. viewer_smoke.mjs instruments the canvas with an
+  init script but reads the tally back with page.evaluate(), which only ever
+  runs in the MAIN frame -- an iframe fixture would report zero canvas text
+  and gate nothing at all. So the fixture is the shipped bundle's code
+  running as the top-level document instead.
+-->
+<link rel="stylesheet" href="./chrome.css">
+<style>
+  /* The stage is resized in place, because a page cannot resize the window
+     it is loaded into and the renderer sizes everything off the canvas. */
+  #layout { transition: none; }
+  #fixture-badge {
+    position: absolute; right: 6px; bottom: 6px; z-index: 30;
+    font-family: var(--finefont); font-size: 9px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--paper-dim);
+    background: rgba(18, 13, 9, 0.7); padding: 2px 6px;
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">GAUNT<span>LET</span></div>
+      <div id="clock">PLY 0</div>
+      <div id="topright">
+        <span id="statuschip">fixture</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+      <div id="fixture-badge">fixture</div>
+    </div>
+    <div id="transport">
+      <div class="scrub" id="scrub"></div>
+      <div class="tbar">
+        <button class="tbtn" id="play">❚❚</button>
+        <span class="tpos" id="pos">0 / 0</span>
+      </div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<div id="loading">LOADING REPLAY…</div>
+<script src="./chrome_common.js"></script>
+<script src="./renderer.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var WIDTHS = [360, 640, 1280];
+  var GAMES = ["connect-four", "breakthrough", "hex", "quoridor"];
+  // A full-cap say: 80 runes, the reply schema's exact limit, in multi-byte
+  // characters so the band is measured on runes and not on bytes.
+  function fullCapSay(lead) {
+    var text = lead;
+    while (Array.from(text).length < 79) text += "日";
+    return text + "✨";
+  }
+  var SAYS = [
+    fullCapSay("centre file, then count both diagonals — "),
+    fullCapSay("their path is nine and mine is six, so I run — ")
+  ];
+  // The longest plausible policy names: the ladder shows the policy name
+  // spectator-side and the anonymous alias underneath it.
+  var POLICY_NAMES = ["board-gauntlet-grandmaster", "board-gauntlet-tempo"];
+  var ALIASES = ["Sprocket", "Flywheel"];
+
+  function sizeOf(game) { return game === "breakthrough" ? 6 :
+    game === "quoridor" ? 9 : 7; }
+  function rowsOf(game) {
+    var size = sizeOf(game);
+    return game === "connect-four" ? size - 1 : size;
+  }
+  function cellName(game, cell) {
+    var cols = sizeOf(game);
+    return String.fromCharCode(97 + (cell % cols)) +
+      String(Math.floor(cell / cols) + 1);
+  }
+
+  function startBoard(game) {
+    var cols = sizeOf(game);
+    var rows = rowsOf(game);
+    var board = [];
+    for (var i = 0; i < cols * rows; i++) board.push("empty");
+    if (game === "breakthrough") {
+      for (var c = 0; c < cols; c++) {
+        board[c] = "seat0";
+        board[cols + c] = "seat0";
+        board[(rows - 2) * cols + c] = "seat1";
+        board[(rows - 1) * cols + c] = "seat1";
+      }
+    }
+    if (game === "quoridor") {
+      board[Math.floor(cols / 2)] = "seat0";
+      board[(rows - 1) * cols + Math.floor(cols / 2)] = "seat1";
+    }
+    return board;
+  }
+
+  function readout(game, seat) {
+    if (game === "connect-four") return "THREATS " + (seat + 1);
+    if (game === "breakthrough") return "PIECES " + (11 - seat) + " · ROW " +
+      (4 - seat);
+    if (game === "hex") return "TO CONNECT " + (3 + seat);
+    return "PATH " + (6 + seat * 3) + " · WALLS " + (7 - seat);
+  }
+
+  // A short synthetic episode per game: enough plies to fill the feed, a
+  // capture and a wall so those beat modifiers are drawn, and a win.
+  function episode(game) {
+    var cols = sizeOf(game);
+    var rows = rowsOf(game);
+    var board = startBoard(game);
+    var anchors = (cols - 1) * (cols - 1);
+    var hWalls = [], vWalls = [];
+    for (var a = 0; a < anchors; a++) { hWalls.push(false); vWalls.push(false); }
+    var pawns = game === "quoridor" ?
+      [Math.floor(cols / 2), (rows - 1) * cols + Math.floor(cols / 2)] :
+      [-1, -1];
+    var wallsLeft = game === "quoridor" ? [10, 10] : [0, 0];
+    var events = [{ kind: "start", seat: -1 }];
+    var states = [];
+
+    function snapshot(ply, last, winner, winPath, done) {
+      return {
+        board_game: game, rotated: true, size: cols, walls: wallsLeft[0],
+        board: board.slice(), hWalls: hWalls.slice(), vWalls: vWalls.slice(),
+        pawns: pawns.slice(), wallsLeft: wallsLeft.slice(),
+        seats: [0, 1].map(function (seat) {
+          return {
+            name: ALIASES[seat], policy: POLICY_NAMES[seat],
+            standing: 1000 - seat * 40, captures: seat, wallsUsed: seat,
+            wallsLeft: wallsLeft[seat],
+            score: done ? (winner === seat ? 1 : winner < 0 ? 0 : -1) : 0,
+            say: SAYS[seat], notes: SAYS[seat], scripted: false,
+            fellBack: false, readout: readout(game, seat)
+          };
+        }),
+        mover: ply % 2, ply: ply, maxPlies: 80, plies: ply,
+        legalCount: 7 + ply,
+        lastMove: last, eval: (ply % 7) / 7 - 0.5,
+        winner: winner, winPath: winPath, phase: done ? "done" : "moving",
+        gameDone: done, reason: done ? "complete" : "",
+        ending: done ? (game === "connect-four" ? "line" :
+          game === "hex" ? "connection" :
+          game === "quoridor" ? "goal-row" : "home-rank") : ""
+      };
+    }
+    states.push(snapshot(0, { seat: -1, move: "", mkind: "drop", capture: "" },
+      -1, [], false));
+
+    var plies = 10;
+    for (var ply = 0; ply < plies; ply++) {
+      var seat = ply % 2;
+      var move, mkind, capture = "";
+      if (game === "connect-four") {
+        var col = (ply * 3 + 1) % cols;
+        move = String.fromCharCode(97 + col);
+        mkind = "drop";
+        for (var row = 0; row < rows; row++) {
+          if (board[row * cols + col] === "empty") {
+            board[row * cols + col] = seat === 0 ? "seat0" : "seat1";
+            break;
+          }
+        }
+      } else if (game === "breakthrough") {
+        var fromRow = seat === 0 ? 1 : rows - 2;
+        var toRow = seat === 0 ? 2 : rows - 3;
+        var file = ply % cols;
+        move = cellName(game, fromRow * cols + file) + "-" +
+          cellName(game, toRow * cols + file);
+        mkind = ply === 5 ? "capture" : "step";
+        if (mkind === "capture") capture = cellName(game, toRow * cols + file);
+        board[fromRow * cols + file] = "empty";
+        board[toRow * cols + file] = seat === 0 ? "seat0" : "seat1";
+      } else if (game === "hex") {
+        var cell = (ply * 5 + 2) % (cols * rows);
+        move = cellName(game, cell);
+        mkind = "place";
+        board[cell] = seat === 0 ? "seat0" : "seat1";
+      } else {
+        if (ply % 3 === 2) {
+          var anchor = (ply * 7) % anchors;
+          move = String.fromCharCode(97 + (anchor % (cols - 1))) +
+            String(Math.floor(anchor / (cols - 1)) + 1) +
+            (ply % 2 ? "v" : "h");
+          mkind = "wall";
+          if (ply % 2) vWalls[anchor] = true; else hWalls[anchor] = true;
+          wallsLeft[seat] = Math.max(0, wallsLeft[seat] - 1);
+        } else {
+          var step = seat === 0 ? cols : -cols;
+          board[pawns[seat]] = "empty";
+          pawns[seat] += step;
+          board[pawns[seat]] = seat === 0 ? "seat0" : "seat1";
+          move = cellName(game, pawns[seat]);
+          mkind = ply === 4 ? "jump" : "step";
+        }
+      }
+      events.push({
+        kind: "move", round: ply, seat: seat, move: move, mkind: mkind,
+        capture: capture, say: SAYS[seat], notes: SAYS[seat],
+        scripted: false, fellBack: ply === 7
+      });
+      states.push(snapshot(ply + 1,
+        { seat: seat, move: move, mkind: mkind, capture: capture },
+        -1, [], false));
+    }
+    var winPath = [cellName(game, 0), cellName(game, 1), cellName(game, 2),
+      cellName(game, 3)];
+    events.push({
+      kind: "win", round: plies - 1, seat: 0,
+      how: game === "connect-four" ? "line" : game === "hex" ? "connection" :
+        game === "quoridor" ? "goal-row" : "home-rank",
+      path: winPath
+    });
+    states.push(snapshot(plies,
+      { seat: 0, move: "", mkind: "place", capture: "" }, 0, winPath, true));
+    events.push({
+      kind: "end", round: plies, reason: "complete",
+      ending: game === "connect-four" ? "line" : game === "hex" ?
+        "connection" : game === "quoridor" ? "goal-row" : "home-rank",
+      scores: [1, -1], standing: [1000, 960]
+    });
+    states.push(snapshot(plies,
+      { seat: 0, move: "", mkind: "place", capture: "" }, 0, winPath, true));
+
+    return {
+      protocol: "gauntlet.replay.v1",
+      names: ALIASES,
+      policyNames: POLICY_NAMES,
+      config: {
+        game: game, rotated: true, size: cols, walls: wallsLeft[0],
+        first: 0, seed: 118829, maxPlies: 80, sampled: true
+      },
+      events: events,
+      states: states,
+      results: {
+        names: POLICY_NAMES, scores: [1, -1], outcome: [1, 0], game: game,
+        rotated: true, size: cols, walls: wallsLeft[0], first: 0,
+        seed: 118829, winner: 0, plies: plies, maxPlies: 80,
+        standing: [1000, 960], captures: [1, 0], wallsUsed: [1, 0],
+        illegalReplies: [0, 1], fallbacks: [0, 1],
+        ending: game === "connect-four" ? "line" : game === "hex" ?
+          "connection" : game === "quoridor" ? "goal-row" : "home-rank",
+        reason: "complete"
+      }
+    };
+  }
+
+  var canvas = document.getElementById("table");
+  var badge = document.getElementById("fixture-badge");
+  var step = 0;
+
+  function applyWidth(width) {
+    var layout = document.getElementById("layout");
+    layout.style.width = width + "px";
+    layout.style.maxWidth = width + "px";
+    document.body.style.width = width + "px";
+    GauntletChrome.relayout();
+    canvas.width = Math.max(80, canvas.clientWidth);
+    canvas.height = Math.max(80, canvas.clientHeight);
+  }
+
+  function cycle() {
+    var width = WIDTHS[Math.floor(step / GAMES.length) % WIDTHS.length];
+    var game = GAMES[step % GAMES.length];
+    applyWidth(width);
+    document.getElementById("loading").style.display = "none";
+    GauntletRenderer.attachReplay({
+      canvas: canvas,
+      feed: document.getElementById("feed"),
+      scrub: document.getElementById("scrub"),
+      playButton: document.getElementById("play"),
+      label: document.getElementById("pos"),
+      clock: document.getElementById("clock"),
+      scorebug: document.getElementById("scorebug"),
+      endscreen: document.getElementById("endscreen"),
+      assetBase: "./assets",
+      payload: episode(game)
+    });
+    badge.textContent = game + " @ " + width + "px";
+    step += 1;
+    window.setTimeout(cycle, 1200);
+  }
+
+  GauntletRenderer.bindFeedToggle(document.getElementById("feedtoggle"), false);
+  window.addEventListener("load", function () { cycle(); });
+})();
+</script>
+</body>
+</html>

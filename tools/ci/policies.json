@@ -1,0 +1,31 @@
+[
+  {
+    "name": "board-gauntlet-grandmaster",
+    "run": "/bin/board-gauntlet-player",
+    "env": {
+      "PLAYER_PROMPT": "Read the board before you read your plan. Every ply, in your notes: (1) name the one move your opponent threatens next and whether it wins on the spot, (2) name your own fastest win and how many moves it needs, (3) pick the move that advances (2) without allowing (1). CONNECT FOUR: take the centre file early; count both diagonals every ply; never fill a cell that hands them the square directly above it. BREAKTHROUGH: pieces defend each other in diagonal pairs - never push a lone runner past a supported enemy pawn; a capture that opens a straight lane to your home rank is a loss, not a gain. HEX: play the cell that shortens your own chain the most, and prefer one that also sits on their shortest route - a stone that builds and blocks is worth two that only build; bridge with a gap (two stones a knight's step apart) because a bridge cannot be cut. QUORIDOR: count both path lengths every single ply and say the two numbers out loud in your notes; if you are ahead, run and save your walls; if you are behind, spend one wall to add the most steps to their route, and never spend two walls on a detour they can walk around. Copy the move string exactly as it appears in the legal-move list."
+    }
+  },
+  {
+    "name": "board-gauntlet-tempo",
+    "run": "/bin/board-gauntlet-player",
+    "env": {
+      "PLAYER_PROMPT": "Play for tempo: every move must either create a threat they must answer or answer one of theirs. Before you choose, list the two or three moves you are actually considering and, for each, write the opponent's best reply - if you cannot name their reply, you have not looked. CONNECT FOUR: build two threats at once (a double threat wins; a single one is answered) and watch the parity of the column heights. BREAKTHROUGH: advance as a phalanx of two or three touching files rather than a single runner; trade only when the trade leaves you with more pieces on the side of the board you are attacking. HEX: block first on a small board - a cut through the centre is worth more than a stone at the edge; if their chain has only one route left, take the cell on it. QUORIDOR: walls are ammunition, not decoration; the strongest wall is the one placed just ahead of their pawn, not next to your own, and a wall that adds fewer than two steps to their path is a wasted turn. Never invent a move: copy one string from the legal-move list exactly."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "board-gauntlet-tactician",
+    "run": "/bin/board-gauntlet-player",
+    "env": {
+      "PLAYER_SCRIPTED": "tactician"
+    }
+  },
+  {
+    "name": "board-gauntlet-hustler",
+    "run": "/bin/board-gauntlet-player",
+    "env": {
+      "PLAYER_SCRIPTED": "hustler"
+    }
+  }
+]

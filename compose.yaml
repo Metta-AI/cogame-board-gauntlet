@@ -1,0 +1,7 @@
+services:
+  board-gauntlet:
+    image: coworld-board-gauntlet:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host

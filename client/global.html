@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Board Gauntlet — Board View</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">GAUNT<span>LET</span></div>
+      <div id="clock">PLY 0</div>
+      <div id="topright">
+        <span id="statuschip">connecting…</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<script src="/client/chrome_common.js"></script>
+<script src="/client/renderer.js"></script>
+<script>
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  window.addEventListener("resize", fit);
+  window.addEventListener("load", fit);
+  fit();
+  GauntletRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+  GauntletRenderer.attachLive({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    status: document.getElementById("statuschip"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    endscreen: document.getElementById("endscreen"),
+    assetBase: "/client/assets",
+    wsPath: "/global"
+  });
+</script>
+<!-- ===================================================================
+     BOARD-GAUNTLET additions to the inherited cogame-babel chrome
+     Everything above this line is cogame-babel's client/global.html copied
+     byte for byte, with three changes: the <title> text, the #wordmark
+     inner text, and the <script src> list, which gains
+     /client/chrome_common.js ahead of /client/renderer.js. No starter
+     element is removed.
+     =================================================================== -->
+<script>
+  GauntletChrome.setFeedText(GauntletRenderer.feedLine);
+  GauntletChrome.setEndColumns(GauntletRenderer.endTable);
+  GauntletChrome.relayout();
+  window.addEventListener("resize", GauntletChrome.relayout);
+</script>
+</body>
+</html>
