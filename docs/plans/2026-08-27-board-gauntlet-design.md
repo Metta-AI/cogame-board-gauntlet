@@ -1276,6 +1276,14 @@ only harness. `NIM_TESTS` is left unset — every `tests/*.nim` runs in both deb
     — record an episode, run `replayMatch` over its events, and assert every frame's
     `boardStateJson` is identical to the live one. A wall-clock stop must re-derive because
     `settle` is the same proc on both paths (particle-worlds `13c66d7`, 2026-08-26).
+    **One recorded exception: `complete/no-moves`.** It is unreachable from the standard
+    Breakthrough opening — a piece on rank 2 always has a rank-1 square to step to or capture on,
+    and a piece that reached rank 1 has already won — so no recorded episode ends that way and
+    `replayMatch`, which re-runs `initSim(config)` from the standard opening, cannot be handed one.
+    It is covered instead from a hand-built position, applied to two copies of the sim, asserting
+    `boardStateJson` and `resultsJson` are identical on both and that a second `settle` cannot
+    change a settled episode. The path itself is re-derivable: `advance` emits the `win` event and
+    `replayMatch`'s `evWin` branch checks seat / how / path like any other.
 19. `replayMatch` **raises** when a recorded `move.mkind`, `move.capture`, `win.seat`, `win.how` or
     `win.path` disagrees with the re-derivation.
 20. **Strict UTF-8**: build an episode whose every `say` and `notes` is a multi-byte string at
