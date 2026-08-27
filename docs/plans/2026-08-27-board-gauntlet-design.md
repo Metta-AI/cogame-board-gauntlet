@@ -925,7 +925,12 @@ is set.
   **byte-for-byte**. Not one starter rule is edited or deleted. The game's rules are **appended**
   below the last starter line under `/* ===== board-gauntlet game block ===== */`: the board
   frame, the eval bar, the `say` band, the four beat-kind classes and their modifiers, the
-  `--band` / `--hudscale` consumers, and the ≤ 640 px / ≤ 360 px media queries.
+  `--band` / `--hudscale` consumers, and the ≤ 640 px / ≤ 360 px media queries. Each of those two
+  media queries is written **twice** — once as `@media`, once keyed on `body.narrow-640` /
+  `body.narrow-360` — declaration for declaration. A page cannot resize the viewport it is loaded
+  into, so `tools/ci/renderer_fixture.html` narrows the stage in place and sets those classes;
+  without the second copy the narrow-width rules would ship untested. Both copies are below the
+  game-block banner, so no starter rule is touched, and they must be edited together.
 - **`client/chrome_common.js`** — the chrome half of cogame-babel's `client/renderer.js`, copied
   **byte-for-byte** out of the starter file (`cp` + slice; not one line is retyped, reformatted or
   "tidied") as these contiguous regions of `d55d999`, in this order:
