@@ -481,9 +481,11 @@ keeps the episode inside the budget.
 
 Certification / smoke path: with no `ANTHROPIC_API_KEY` both seats play scripted, there is no LLM
 call, the spacing floor does not apply, `turnDelayMs = 0`, and the `breakthrough-6` fixture
-completes in well under 3 s of play — inside `coworld certify`'s 60 s default. The release workflow
-still passes `--timeout-seconds 300`, and a test pins the fixture's scripted duration under 50 s
-(cogame-commons-family 0.1.0, 2026-08-24).
+completes in well under 3 s of play — inside `coworld certify`'s 60 s default, which is the only
+budget the certify step has: the shared `coworld-release.yml` template passes `--no-open-report`
+and nothing else, and this repo ships that template **byte for byte**, so no `--timeout-seconds`
+is added here. A test pins the fixture's scripted duration under 50 s (cogame-commons-family
+0.1.0, 2026-08-24), which is what keeps it inside that default.
 
 ### The ladder — degrade, never hang
 
@@ -1206,9 +1208,10 @@ It is committed mode `100755`.
 
 - **`.github/workflows/`** — `ci.yml`, `coworld-release.yml` and `coworld-submit.yml` from
   `coworld-builder/templates/`, with `SLUG=board-gauntlet`, `IMAGE=coworld-board-gauntlet`,
-  `<SEATS>=2`. The release workflow's certify step passes `--timeout-seconds 300`, its `secret put`
-  step reads the namespace from the manifest's `game.name`, and it keeps the load-bearing step
-  order build → certify → **upload-policies** → upload-coworld → secret put.
+  `<SEATS>=2`. The two coworld workflows are the substituted templates **byte for byte** — nothing
+  is added to the certify step, which passes `--no-open-report` as the template does — its
+  `secret put` step reads the namespace from the manifest's `game.name`, and it keeps the
+  load-bearing step order build → certify → **upload-policies** → upload-coworld → secret put.
 
 - **`tools/ci/policies.json`** — the four policies from `## Decisions`; champion #2 carries
   `"player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"` so it is uploaded while daveey-1 is the
