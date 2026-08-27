@@ -1069,8 +1069,14 @@ pawns, and walls drawn as planks that snap into their groove.
 - `data/font.ttf` + `data/FONT_LICENSE.txt` — copied from babel (Rajdhani).
 - `data/arena_floor.png` — copied byte-for-byte from babel (MIT, originally coworld-ctf); the table
   surface under the board.
-- `data/soldier_red_front.png`, `data/soldier_blue_front.png` — copied from babel; the two seat
-  avatars in the scorebug plates.
+- `data/soldier_red_front.png`, `data/soldier_blue_front.png` — **new, authored for this repo**
+  under babel's filenames (the chrome asks for those two names): 192×192 seat cogs, generated as
+  one two-up sheet by `scripts/art/generate_cog_sheet.py` from
+  `scripts/art/source/cog_seats_sheet.png` and keyed/split/padded by
+  `scripts/art/split_cog_sheet.py`, so each seat holds this ladder's own pieces — the red cog a
+  Connect Four disc and a Hex stone, the blue cog a Breakthrough pawn and a Quoridor wall plank
+  — rather than babel's spellcasters. They are the two seat avatars in the scorebug plates and
+  are **not** byte-copies of babel's (which are 180×192).
 - **`data/board_grain.png`** — new, authored for this repo: a 64×64 seamlessly tileable printed-
   board paper grain in `--ink` on transparent, laid under every board so the four games share one
   surface.
