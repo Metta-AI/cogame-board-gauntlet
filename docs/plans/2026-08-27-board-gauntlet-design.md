@@ -987,8 +987,11 @@ is set.
   - **Removed from the starter page: nothing.** No starter element is deleted from any of the four
     pages.
   - **Changed:** the `<title>` text, the `#wordmark` inner text
-    (`BA<span>BEL</span>` → `GAUNT<span>LET</span>`), and the `<script src>` list, which gains
-    `/client/chrome_common.js` ahead of `/client/renderer.js`.
+    (`BA<span>BEL</span>` → `GAUNT<span>LET</span>`), the `#clock` placeholder text
+    (`ROUND 0` → `PLY 0`, because this ladder counts plies and the placeholder is on screen until
+    the first frame lands), the `<script src>` list, which gains `/client/chrome_common.js` ahead
+    of `/client/renderer.js`, and the bootstrap's `BabelRenderer` → `GauntletRenderer`. The
+    element itself is kept, with its id; only the text inside it changes.
   - **Appended:** one `<script>` block at the end that registers the game's feed text and endcard
     columns with `GauntletChrome`, and **one** new element — `<div id="evalbar"><i></i></div>` —
     appended **inside the existing `#scorebug`** by the game block at runtime, never spliced into
