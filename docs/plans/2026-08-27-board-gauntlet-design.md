@@ -432,6 +432,14 @@ of one bot. It **never defends**: it maximises its own progress and ignores the 
      legal wall that maximises `dist(opponent)`, ties by lowest anchor index, and if no wall
      increases it, step along its own shortest route.
 
+**Neither baseline has a tunable parameter**, which is why this repo ships no grid harness: both
+are pure one-ply lookahead over `legalMoves` / `applyProbe` / `standing`, with no thresholds,
+weights, temperatures or search depths to sweep. The only numbers in the loop are the four
+`standing` definitions fixed verbatim above, and they are scoring rules, not knobs. What a harness
+would otherwise establish is established by tests instead: the fillers beat a uniform-random legal
+mover, they disagree with each other, and they never walk past an immediate win or into an
+immediate loss.
+
 A test asserts `tactician` and `hustler` disagree on **at least 30 %** of plies over 200 seeded
 episodes per game — two fillers that play the same game are one filler — with **one recorded
 exception: Connect Four, where the floor is 25 %**. Both baselines score from the same window
