@@ -926,7 +926,7 @@ is set.
   **963–970** (`reasonLine`), **972–1027** (`updateEndscreen`), **1029–1048** (`bindFeedToggle`)
   and **1142–1222** (the scrubber comment and `buildScrub`). It exports `window.GauntletChrome`.
 
-  **Exactly six copied lines/regions are edited**, and each is named here so a reviewer can find
+  **Exactly seven copied lines/regions are edited**, and each is named here so a reviewer can find
   it — everything else in the file is copied bytes or appended at the end:
 
   | # | Starter line(s) | Edit |
@@ -937,6 +937,7 @@ is set.
   | 4 | 1179–1189 (`buildScrub`) | babel's marker-`div` loop → `markPlyBeat(container, event, i, events.length, onSeek)` for **every** event; `markPlyBeat` is appended at the end of the file |
   | 5 | 1004–1008 and 1020–1023 (`updateEndscreen`) | the hard-coded `end-head` labels and the `cell(...)` calls → one injected `endColumns(results)` returning `{heads:[…], cell(i)}`, injected by `GauntletChrome.setEndColumns(fn)` |
   | 6 | 966–967 (`reasonLine`) | `results.rounds` / `results.maxRounds` → `results.plies` / `results.maxPlies`, and the word `rounds` → `plies` |
+  | 7 | 994–999 (`updateEndscreen`) | the endcard verdict and title, which §Readouts already specifies: `… " LEADS THE TABLE" : "ALL LEVEL"` → `escapeHtml(clampName(names[topIndex])).toUpperCase() + " WINS" : "DRAWN"` (two seats and a zero-sum result — one of them wins or the game is drawn), and `FINAL — <rounds> ROUND(S)` → `FINAL — <plies> PLY/PLIES` |
 
   **Appended** at the end of `chrome_common.js`, in this order: `relayout()`, `markPlyBeat()`,
   `setFeedText()`, `setEndColumns()`, and the `window.GauntletChrome` export. **Nothing is renamed

@@ -16,7 +16,7 @@
 //   COPIED-REGION 1029-1048  bindFeedToggle
 //   COPIED-REGION 1142-1222  the scrubber comment and buildScrub
 //
-// Exactly six copied lines/regions are edited and each edit is marked in
+// Exactly seven copied lines/regions are edited and each edit is marked in
 // place as `BOARD-GAUNTLET EDIT n` with the starter line numbers it
 // replaces. Everything else is copied bytes, or is APPENDED at the end of
 // the file under "BOARD-GAUNTLET additions to the inherited cogame-babel
