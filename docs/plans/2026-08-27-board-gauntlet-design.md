@@ -452,6 +452,10 @@ Haiku is `cut off at max_tokens` at 400), `model = "claude-sonnet-5"` (the hoste
 `us.anthropic.claude-haiku-4-5-20251001-v1:0` first, and **the candidate list drops
 `us.anthropic.claude-sonnet-4-6`**, which times out on every sidecar call — raid, 2026-08-23),
 `plySpacingSeconds = 0` meaning *derive as 4*, `turnDelayMs = 250` (0 in the cert fixture).
+The direct Anthropic request body also carries `output_config: {"effort": "low"}` — a board move
+needs no long deliberation and low effort is the cheaper, faster setting — but **only** when the
+model is neither a Haiku nor a `4-5` tier, which reject the whole request with a 400 if the field
+is present. The Bedrock path never sends it.
 
 **Rate floor.** The Bedrock sidecar caps **30 requests per minute per episode**. A ply issues at
 most 2 requests (the call plus one retry), so the minimum spacing between the starts of two
