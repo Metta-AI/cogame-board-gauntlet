@@ -326,7 +326,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(decision.move, decision.say, decision.notes,
             decision.scripted, decision.fellBack)
         except GauntletError as error:
-          echo "board-gauntlet: move rejected (", error.msg,
+          echo "board-gauntlet: move rejected (",
+            cleanText(error.msg, MaxErrorLen),
             "); falling back to the tactician baseline"
           let fallback = tacticianMove(state.sim)
           state.sim.applyMove(fallback, "", "", false, true)
@@ -480,7 +481,8 @@ proc websocketHandler(
             prompt.len, " chars",
             (if baseline.len > 0: ", scripted " & baseline else: ""), ")"
       except CatchableError as error:
-        echo "board-gauntlet: ignoring bad player frame: ", error.msg
+        echo "board-gauntlet: ignoring bad player frame: ",
+          cleanText(error.msg, MaxErrorLen)
     of ErrorEvent:
       discard
     of CloseEvent:
