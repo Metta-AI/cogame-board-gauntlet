@@ -950,9 +950,11 @@ is set.
   | 6 | 966–967 (`reasonLine`) | `results.rounds` / `results.maxRounds` → `results.plies` / `results.maxPlies`, and the word `rounds` → `plies` |
   | 7 | 994–999 (`updateEndscreen`) | the endcard verdict and title, which §Readouts already specifies: `… " LEADS THE TABLE" : "ALL LEVEL"` → `escapeHtml(clampName(names[topIndex])).toUpperCase() + " WINS" : "DRAWN"` (two seats and a zero-sum result — one of them wins or the game is drawn), and `FINAL — <rounds> ROUND(S)` → `FINAL — <plies> PLY/PLIES` |
 
-  **Appended** at the end of `chrome_common.js`, in this order: `relayout()`, `markPlyBeat()`,
-  `setFeedText()`, `setEndColumns()`, and the `window.GauntletChrome` export. **Nothing is renamed
-  in place.**
+  **Appended** at the end of `chrome_common.js`, in this order: `relayout()`, `setBeatNames()`,
+  `beatSeatName()`, `beatLabel()`, `markPlyBeat()`, `setFeedText()`, `setEndColumns()`, and the
+  `window.GauntletChrome` export. (`setBeatNames`, `beatSeatName` and `beatLabel` are what give a
+  beat button its `aria-label` / `title` — `markPlyBeat` calls `beatLabel`, which needs the name
+  map the driver installs.) **Nothing is renamed in place.**
 
   Babel's game-specific procs are **not** copied; their replacements live in the game block: the
   palette/geometry/scene drawing at 17–100 and 126–679, `spellTokens` (746–749), `describeEvent`
