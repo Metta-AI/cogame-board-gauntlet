@@ -929,6 +929,8 @@ is set.
 - **`client/chrome_common.js`** — the chrome half of cogame-babel's `client/renderer.js`, copied
   **byte-for-byte** out of the starter file (`cp` + slice; not one line is retyped, reformatted or
   "tidied") as these contiguous regions of `d55d999`, in this order:
+  **23** (`COLORS`, the seat palette), **85–87** (`seatColor`) — both are referenced by the copied
+  `renderFeed` and `updateEndscreen`, so they come across with them —
   **101–124** (`ellipsize`, `hexToRgb`, `shade`, `rgba`), **680–733** (`// ---- Names ----` through
   `clampName`: `isBaselineFiller`, `makeNameMap`, `applyNames`, `clampName`), **735–744**
   (`// ---- Event feed ----`, `roundBase`), **790–863** (`blockHead`, `renderFeed`, `escapeHtml`),
