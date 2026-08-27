@@ -249,8 +249,9 @@ the documented way to blow the 720 s budget. Nothing in v1 uses it.)
 1. **`beginPly`.** `mover = (config.first + p) mod 2`.
 2. **Wall-clock guard.** If `now + worstPlySeconds > playDeadline` → `settle("deadline",
    "wall-clock")` and stop. Checked **here, before any observation is built**, so the episode never
-   stops mid-ply. `worstPlySeconds = 2 × llmTimeoutSeconds + 2 = 62`;
-   `playDeadline = gameStart + 0.6 × episodeTimeoutSeconds`.
+   stops mid-ply. Every wait that follows the guard is inside it:
+   `worstPlySeconds = 2 × llmTimeoutSeconds + 2 + plySpacing + turnDelay = 60 + 2 + 4 + 0.25 =
+   66.25`; `playDeadline = gameStart + 0.6 × episodeTimeoutSeconds`.
 3. **Build the mover's observation** (§`## Server, player, protocol`), including
    `legalMoves(sim)` — produced by the **same proc the validator applies** in step 5, so the printed
    set and the accepted set cannot drift.
@@ -465,10 +466,12 @@ per-ply wall clock is `max(4 s floor, ~3 s haiku latency) + ~0.4 s apply/broadca
 
 Every variant's **full-length** game fits inside 60 % of the timeout with room to spare, which is
 why `maxPlies` is 80 and not 200. The pathological case is latency, not length: worst case per ply
-is `2 × llmTimeoutSeconds + 2 = 62 s`, and `80 × 62 = 4960 s` would overrun by nearly seven times.
-That is why **step 2 of the resolution order refuses to open a ply unless `now + 62 s ≤
-playDeadline`** and settles `deadline` / `wall-clock` instead, scored on `standing`. The guard, not
-optimism, is what keeps the episode inside the budget.
+is `2 × llmTimeoutSeconds + 2 + plySpacing + turnDelay = 66.25 s`, and `80 × 66.25 = 5300 s` would
+overrun by more than seven times. That is why **step 2 of the resolution order refuses to open a
+ply unless `now + 66.25 s ≤ playDeadline`** and settles `deadline` / `wall-clock` instead, scored on
+`standing`. The spacing sleep and the turn delay are counted because they run **after** the guard;
+leaving them out let the settle land ~2 s past the 720 s mark. The guard, not optimism, is what
+keeps the episode inside the budget.
 
 Certification / smoke path: with no `ANTHROPIC_API_KEY` both seats play scripted, there is no LLM
 call, the spacing floor does not apply, `turnDelayMs = 0`, and the `breakthrough-6` fixture

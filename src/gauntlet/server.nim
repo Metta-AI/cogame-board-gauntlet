@@ -270,13 +270,17 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     let playDeadline =
       if timeoutSeconds > 0.0: gameStart + timeoutSeconds * PlayBudgetFraction
       else: 0.0
-    ## The pathological case is latency, not length: one ply can cost the
-    ## call plus one retry plus apply/broadcast. Refuse to OPEN a ply that
-    ## could outrun the budget rather than stopping mid-ply.
-    let worstPlySeconds = float(2 * config.llmTimeoutSeconds + 2)
     let plySpacing =
       if config.plySpacingSeconds > 0: config.plySpacingSeconds
       else: DerivedPlySpacingSeconds
+    ## The pathological case is latency, not length: one ply can cost the
+    ## spacing floor, then the call plus one retry, then apply/broadcast,
+    ## then the turn delay -- and every one of those runs AFTER the guard,
+    ## so all four are in the worst case it refuses to open a ply against.
+    ## Refuse to OPEN a ply that could outrun the budget rather than
+    ## stopping mid-ply.
+    let worstPlySeconds = float(2 * config.llmTimeoutSeconds + 2) +
+      plySpacing.float + config.turnDelayMs.float / 1000.0
     if playDeadline > 0.0:
       echo "board-gauntlet: episode timeout ", timeoutSeconds.int, "s (",
         (if hostedTimeout.len > 0: "from env" else: "assumed"),
