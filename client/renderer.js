@@ -228,7 +228,7 @@
   function drawConnectFour(ctx, layout, state, wins) {
     var r = layout.cell * 0.38;
     ctx.save();
-    ctx.fillStyle = "rgba(63, 124, 196, 0.22)";
+    ctx.fillStyle = "rgba(63, 124, 196, 0.34)";
     ctx.strokeStyle = "rgba(242, 232, 216, 0.22)";
     ctx.lineWidth = Math.max(1, layout.cell * 0.05);
     roundRect(ctx, layout.ox, layout.oy, layout.boardW, layout.boardH,
@@ -281,7 +281,7 @@
         var x = cellX(layout, row, col);
         var y = cellY(layout, row);
         ctx.fillStyle = (row + col) % 2 === 0 ?
-          "rgba(242, 232, 216, 0.10)" : "rgba(242, 232, 216, 0.03)";
+          "rgba(242, 232, 216, 0.20)" : "rgba(242, 232, 216, 0.07)";
         ctx.fillRect(x, y, layout.cell, layout.cell);
         var seat = seatOfOccupant(occupantAt(state, row, col));
         if (seat >= 0) {
@@ -357,7 +357,7 @@
         hexPath(ctx, cx, cy, r);
         var seat = seatOfOccupant(occupantAt(state, row, col));
         if (seat < 0) {
-          ctx.fillStyle = "rgba(242, 232, 216, 0.07)";
+          ctx.fillStyle = "rgba(242, 232, 216, 0.13)";
         } else {
           ctx.fillStyle = seat === 0 ? COLOR_HEX.red : COLOR_HEX.blue;
         }
@@ -396,7 +396,7 @@
       for (var col = 0; col < layout.cols; col++) {
         var x = cellX(layout, row, col) + groove / 2;
         var y = cellY(layout, row) + groove / 2;
-        ctx.fillStyle = "rgba(242, 232, 216, 0.08)";
+        ctx.fillStyle = "rgba(242, 232, 216, 0.15)";
         roundRect(ctx, x, y, tile, tile, tile * 0.12);
         ctx.fill();
         if (wins[row * layout.cols + col]) {

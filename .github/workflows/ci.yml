@@ -323,10 +323,17 @@ jobs:
           # coworld whose whole board fits the frame. DROP THIS FLAG ONLY if
           # the board is pannable, where drawing off-frame is normal -- the
           # count is still reported on stdout and in viewer-smoke.json.
+          # --soak 10: LOADING IS NOT PLAYING. A viewer that draws its first
+          # frame, sets data-replay-loaded and then throws mid-playback looks
+          # exactly like a working one to a load signal and to a screenshot
+          # (cogball 0.1.4). The breakthrough-6 certification fixture emits
+          # ~47 events at 700-1500 ms a beat, so there is ~35 s of playback
+          # behind this 10 s window.
           node tools/ci/viewer_smoke.mjs \
             --bundle dist/static-replay-viewer \
             --replay "${replay}" \
             --timeout 90 \
+            --soak 10 \
             --strict-text-bounds
 
       # CI replays carry ZERO LLM text -- docker_smoke.sh runs without a key

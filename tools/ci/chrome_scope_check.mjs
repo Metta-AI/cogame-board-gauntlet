@@ -123,7 +123,7 @@ for (const region of regions) {
     );
   }
 }
-for (let edit = 1; edit <= 6; edit += 1) {
+for (let edit = 1; edit <= 7; edit += 1) {
   const marker = new RegExp(`BOARD-GAUNTLET EDIT ${edit}[ab]?\\b`);
   if (!marker.test(chrome)) {
     problems.push(`${chromePath}: chrome edit ${edit} is no longer marked`);

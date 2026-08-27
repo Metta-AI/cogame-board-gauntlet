@@ -288,6 +288,10 @@
     layout.style.width = width + "px";
     layout.style.maxWidth = width + "px";
     document.body.style.width = width + "px";
+    // The shipped page collapses the feed behind its toggle under 640 px;
+    // the media query keys off the VIEWPORT, which a page cannot resize, so
+    // the fixture applies the same class the toggle would.
+    document.body.classList.toggle("feed-collapsed", width <= 640);
     GauntletChrome.relayout();
     canvas.width = Math.max(80, canvas.clientWidth);
     canvas.height = Math.max(80, canvas.clientHeight);
@@ -315,7 +319,7 @@
     window.setTimeout(cycle, 1200);
   }
 
-  GauntletRenderer.bindFeedToggle(document.getElementById("feedtoggle"), false);
+  GauntletRenderer.bindFeedToggle(document.getElementById("feedtoggle"), true);
   window.addEventListener("load", function () { cycle(); });
 })();
 </script>

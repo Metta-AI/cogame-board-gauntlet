@@ -260,12 +260,18 @@
       return (scores[i] || 0) === (scores[topIndex] || 0);
     });
     var verdictColor = !level && topIndex >= 0 ? seatColor(topIndex) : "";
+    // BOARD-GAUNTLET EDIT 7 (starter lines 994-999): two seats and a
+    // zero-sum result, so one of them WINS or the game is DRAWN -- nobody
+    // "leads the table" -- and the title counts the PLIES this game's
+    // results actually carry rather than the starter's rounds.
     var verdict = !level && topIndex >= 0 ?
-      escapeHtml(names[topIndex]) + " LEADS THE TABLE" : "ALL LEVEL";
+      escapeHtml(clampName(names[topIndex])).toUpperCase() + " WINS" :
+      "DRAWN";
     var reason = reasonLine(results);
+    var plies = results.plies || 0;
     var html = '<div class="end-panel">' +
-      '<div class="end-title">FINAL — ' + (results.rounds || 0) + " ROUND" +
-      ((results.rounds || 0) === 1 ? "" : "S") + "</div>" +
+      '<div class="end-title">FINAL — ' + plies +
+      (plies === 1 ? " PLY" : " PLIES") + "</div>" +
       '<div class="end-verdict ' + verdictColor + '">' + verdict + "</div>" +
       (reason ? '<div class="end-reason">' + escapeHtml(reason) + "</div>" :
         "") +
