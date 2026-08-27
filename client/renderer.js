@@ -728,8 +728,14 @@
     var size = boardCols(state) + "\u00D7" + boardRows(state);
     // The rotation arrow appears ONLY when the episode was drawn.
     var head = (state.rotated ? "GAUNTLET \u2192 " : "") + label;
-    // Under 640 px the size word is the first thing to go.
-    if (window.innerWidth >= 640) head += " " + size;
+    // Under 640 px the size word is the first thing to go. Measured on the
+    // element the layout is actually laid out in, not on window.innerWidth:
+    // a page cannot resize its own viewport, so a viewport-only test is
+    // invisible to the renderer fixture and to any embed that narrows the
+    // stage rather than the window.
+    var pageWidth = document.body ? document.body.clientWidth :
+      window.innerWidth;
+    if (pageWidth >= 640) head += " " + size;
     parts.push(head);
     parts.push("PLY " + (state.plies || 0) + " / " + (state.maxPlies || 0));
     if (state.gameDone) {
