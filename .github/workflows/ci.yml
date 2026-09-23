@@ -155,6 +155,26 @@ jobs:
           done
           exit "${fail}"
 
+      - name: Training artifact smoke
+        run: |
+          nim c --hints:off -d:release --path:src --out:/tmp/export-posttrain tools/export_posttrain.nim
+          /tmp/export-posttrain /tmp/board-gauntlet-training 20
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          output = Path('/tmp/board-gauntlet-training')
+          manifest = json.loads((output / 'manifest.json').read_text())
+          assert {run['game'] for run in manifest['runs']} == {
+              'connect-four', 'breakthrough', 'hex', 'quoridor'
+          }
+          assert all(run['results']['reason'] == 'complete' for run in manifest['runs'])
+          for split in ('train', 'validation'):
+              rows = [json.loads(line) for line in (output / f'{split}.jsonl').read_text().splitlines()]
+              assert len(rows) == manifest[f'{split}_examples']
+              assert rows
+          PY
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.

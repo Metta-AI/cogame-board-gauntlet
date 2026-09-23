@@ -46,6 +46,9 @@ field one of the two built-in baselines. They also play *every* seat when no
 LLM credentials are available, which is what makes offline certification and
 the raw-Docker smoke complete.
 
+For model training from complete local games, see
+[docs/training.md](docs/training.md).
+
 - **`tactician`** — wins on the spot when it can; otherwise refuses moves that
   hand the opponent an immediate win; otherwise maximises
   `standing(self) − standing(opponent)`; ties go to the lowest canonical move
