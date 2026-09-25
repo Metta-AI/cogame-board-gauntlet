@@ -5,13 +5,13 @@
 ## start and neither client route may open the player socket):
 ##   GET /healthz                    - liveness
 ##   GET /client/global              - spectator page
-##   GET /client/player              - player page (view-only; policies are prompts)
+##   GET /client/player              - player page (view-only)
 ##   GET /client/replay              - replay page (replay mode)
 ##   GET /client/renderer.js         - the game block
 ##   GET /client/chrome_common.js    - the inherited chrome
 ##   GET /client/chrome.css
 ##   GET /client/assets/<name>       - sprites and fonts
-##   WS  /player?slot=N&token=T      - gauntlet.player.v1 (live mode only)
+##   WS  /player?slot=N&token=T      - gauntlet.player.v2 (live mode only)
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
@@ -27,11 +27,12 @@ import
   mummy,
   mummy/routers,
   llm,
+  observation,
   sim
 
 const
   ReplayProtocol = "gauntlet.replay.v1"
-  PlayerProtocol = "gauntlet.player.v1"
+  PlayerProtocol = "gauntlet.player.v2"
   ## Share of the platform's episode timeout spent playing. The rest covers
   ## container start, player connects, and writing the artifacts - the part
   ## that must never be the thing that runs out of time.
@@ -46,6 +47,11 @@ type
     sim: Sim
     prompts: seq[string]
     baselines: seq[string]      ## "" = LLM seat, else the baseline's name
+    registered: array[2, bool]
+    external: array[2, bool]
+    decisionId: int
+    pendingSeat: int
+    pendingMove: string
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -98,10 +104,8 @@ proc snapshotJson(gs: GameState): JsonNode =
   result["connected"] = connected
 
 proc playerStateJson(gs: GameState, slot: int): JsonNode =
-  ## Redacted to the seat's own tallies. It carries no board and no move
-  ## list because DECISIONS ARE SERVER-SIDE, so this loses the policy
-  ## nothing; it also means no wire exists on which two seats could
-  ## coordinate.
+  ## General state updates carry only tallies. External policies receive a
+  ## separate observation with the board and legal moves on their turn.
   %*{
     "type": "state",
     "slot": slot,
@@ -243,7 +247,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     while epochTime() < connectDeadline:
       var allConnected = false
       withLock stateLock:
-        allConnected = state.playerSockets.len >= config.tokens.len
+        allConnected = state.playerSockets.len >= config.tokens.len and
+          state.registered[0] and state.registered[1]
       if allConnected:
         break
       sleep(200)
@@ -293,6 +298,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seatPrompt: string
       var seatBaseline: string
       var mover = -1
+      var external = false
       withLock stateLock:
         if state.sim.done:
           break
@@ -308,6 +314,40 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         seatPrompt = state.prompts[mover]
         seatBaseline = state.baselines[mover]
+        external = state.external[mover] and state.playerSockets.hasKey(mover)
+
+      if external:
+        withLock stateLock:
+          inc state.decisionId
+          state.pendingSeat = mover
+          state.pendingMove = ""
+          state.playerSockets[mover].send($ %*{
+            "type": "observation",
+            "id": state.decisionId,
+            "observation": state.sim.playerObservation(mover)
+          })
+        let replyDeadline = epochTime() + config.llmTimeoutSeconds.float
+        var move = ""
+        while epochTime() < replyDeadline:
+          withLock stateLock:
+            move = state.pendingMove
+          if move.len > 0:
+            break
+          sleep(50)
+        withLock stateLock:
+          state.pendingSeat = -1
+          state.pendingMove = ""
+          if move.len > 0:
+            state.sim.applyMove(move, "", "", false, false)
+          else:
+            state.sim.applyMove(tacticianMove(state.sim), "", "", false, true)
+          echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
+            " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
+            (epochTime() - gameStart).int, "s"
+          state.broadcastLocked()
+        if config.turnDelayMs > 0:
+          sleep(config.turnDelayMs)
+        continue
 
       let usesLlm = seatBaseline.len == 0 and not client.disabled
       if usesLlm and lastLlmStart > 0.0:
@@ -481,9 +521,27 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.baselines[slot] = baseline
+            state.registered[slot] = true
+            state.external[slot] = false
           echo "board-gauntlet: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if baseline.len > 0: ", scripted " & baseline else: ""), ")"
+        elif payload{"type"}.getStr() == "register" and
+            payload{"control"}.getStr() == "external":
+          withLock stateLock:
+            state.registered[slot] = true
+            state.external[slot] = true
+          echo "board-gauntlet: slot ", slot, " registered external policy"
+        elif payload{"type"}.getStr() == "action":
+          let id = payload["id"].getInt()
+          let move = payload["move"].getStr()
+          withLock stateLock:
+            if state.external[slot] and state.pendingSeat == slot and
+                state.decisionId == id and state.pendingMove.len == 0:
+              if state.sim.isLegalMove(move):
+                state.pendingMove = move
+              else:
+                inc state.sim.illegalReplies[slot]
       except CatchableError as error:
         echo "board-gauntlet: ignoring bad player frame: ",
           cleanText(error.msg, MaxErrorLen)
@@ -567,6 +625,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.baselines = newSeq[string](config.players.len)
+  state.pendingSeat = -1
 
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler)

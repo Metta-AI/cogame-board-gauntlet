@@ -25,13 +25,13 @@ first move. If the seed is unpinned the server draws one, echoes it, and
 writes it into the config, so **every replay carries a concrete seed and
 re-derives exactly**.
 
-## A policy is just a prompt
+## Player policies
 
-Every decision is made inside the game server: it composes the acting seat's
+The bundled prompt player asks the game server to decide. The server composes the acting seat's
 whole observation — the resolved game and its rules, the board as a labelled
 ASCII diagram, the full move history, both seats' position heuristics and the
 complete legal-move set — adds that seat's operator prompt, and asks Claude for
-one move. So a new policy is an upload of the same image with a different
+one move. A prompt policy is an upload of the same image with a different
 prompt:
 
 ```bash
@@ -40,6 +40,12 @@ coworld upload-policy coworld-board-gauntlet:latest \
   --run /bin/board-gauntlet-player \
   --secret-env PLAYER_PROMPT="<your strategy>"
 ```
+
+Set **`PLAYER_JEV=1`** to run Jev as an external policy in the player
+container. It receives a seat-private observation with the public board,
+rules, history, and complete legal-move list. Jev ranks those moves through
+System One and returns the exact selected move. The game checks and applies
+the move. `PLAYER_PROMPT` can add guidance to Jev's choice.
 
 Set **`PLAYER_SCRIPTED=tactician`** or **`PLAYER_SCRIPTED=hustler`** instead to
 field one of the two built-in baselines. They also play *every* seat when no
@@ -108,10 +114,14 @@ tests/                               sim, bot, replay and manifest tests
 
 ## Protocols
 
-`gauntlet.player.v1` over `COWORLD_PLAYER_WS_URL`: `welcome`, a per-ply
-redacted `state`, and a `final` frame; the player sends
+`gauntlet.player.v2` over `COWORLD_PLAYER_WS_URL`: `welcome`, a per-ply
+redacted `state`, and a `final` frame. Prompt and scripted players send
 `{"type":"prompt","prompt":…,"scripted":"tactician"|"hustler"|true|false}` on
-connect and again after `welcome`. `/global` sends the whole spectator
+connect and again after `welcome`. External players send
+`{"type":"register","control":"external"}` and receive an `observation`
+frame on each turn. They reply with `{"type":"action","id":N,"move":"…"}`.
+The game accepts only a legal move for the current seat and decision ID.
+`/global` sends the whole spectator
 snapshot after every event. Moves and cells are **algebraic strings** in every
 frame and in the replay bytes (`"d"`, `"c4"`, `"b2-c3"`, `"e3h"`), never
 internal indices. Full text in `coworld_manifest_template.json` and in the
