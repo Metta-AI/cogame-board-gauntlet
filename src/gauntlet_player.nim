@@ -40,12 +40,12 @@ when isMainModule:
   let url = getEnv("COWORLD_PLAYER_WS_URL")
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
-  var prompt = getEnv("PLAYER_PROMPT")
-  if prompt.len == 0:
-    prompt = DefaultPrompt.strip()
-  let scripted = scriptedSetting()
   let jev = getEnv("PLAYER_JEV").strip().toLowerAscii() in
     ["1", "true", "yes"]
+  var prompt = getEnv("PLAYER_PROMPT")
+  if prompt.len == 0 and not jev:
+    prompt = DefaultPrompt.strip()
+  let scripted = scriptedSetting()
   if jev and scripted.len > 0:
     quit("PLAYER_JEV and PLAYER_SCRIPTED cannot both be set", 1)
 

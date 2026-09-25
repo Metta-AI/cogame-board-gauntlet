@@ -17,6 +17,7 @@ class SystemOne(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         assert self.path == "/v1/systemone"
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        assert "reply with only the JSON object" not in body["state"]
         observation = json.loads(body["state"].split("\nYour observation:\n", 1)[1])
         choices = body["questions"]["decision"]["criteria"]
         assert list(choices) == observation["legalMoves"]
