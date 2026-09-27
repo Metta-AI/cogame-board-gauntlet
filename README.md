@@ -41,11 +41,9 @@ coworld upload-policy coworld-board-gauntlet:latest \
   --secret-env PLAYER_PROMPT="<your strategy>"
 ```
 
-Set **`PLAYER_JEV=1`** to run Jev as an external policy in the player
-container. It receives a seat-private observation with the public board,
-rules, history, and complete legal-move list. Jev ranks those moves through
-System One and returns the exact selected move. The game checks and applies
-the move. `PLAYER_PROMPT` can add guidance to Jev's choice.
+An external policy receives a seat observation with the public board, rules,
+history, and complete legal-move list. It returns an exact move for the game
+to validate and apply.
 
 Set **`PLAYER_SCRIPTED=tactician`** or **`PLAYER_SCRIPTED=hustler`** instead to
 field one of the two built-in baselines. They also play *every* seat when no

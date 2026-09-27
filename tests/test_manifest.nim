@@ -169,7 +169,6 @@ suite "upload contract":
       check player["resources"]["limits"]["cpu"].getStr() == "1"
       check player["resources"]["requests"]["cpu"].getStr() == "100m"
       check player["resources"]["requests"]["memory"].getStr() == "64Mi"
-    ## Jev can use the same image through PLAYER_JEV=1 in a policy upload.
     check not manifest["player"][0].hasKey("env")
     check manifest["player"][1]["env"]["PLAYER_SCRIPTED"].getStr() ==
       "tactician"

@@ -18,7 +18,7 @@
     "replay_viewer": {
       "bundle": "static-replay-viewer"
     },
-    "description": "Board Gauntlet rotates Connect Four, Breakthrough, Hex, and Quoridor for two players. Each acting seat can receive its own observation with the board, move history, rules, position summary, and complete legal-move set. External players send one legal move; the game validates and applies it. The same player image runs Jev through System One with PLAYER_JEV=1. Prompt players still send a strategy for server-side Claude decisions. Scripted tactician and hustler baselines remain available. Scores are +1 for a win, 0 for a draw, and -1 for a loss.",
+    "description": "Board Gauntlet rotates Connect Four, Breakthrough, Hex, and Quoridor for two players. Each acting seat can receive its own observation with the board, move history, rules, position summary, and complete legal-move set. External players send one legal move; the game validates and applies it. Prompt players still send a strategy for server-side Claude decisions. Scripted tactician and hustler baselines remain available. Scores are +1 for a win, 0 for a draw, and -1 for a loss.",
     "owner": "daveey@gmail.com",
     "runnable": {
       "type": "game",
@@ -344,7 +344,7 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "gauntlet.player.v2 uses JSON text frames over COWORLD_PLAYER_WS_URL (?slot=N&token=T). On connect the game sends welcome with protocol, slot, alias, game, size, and caps. A player registers with {\"type\":\"register\",\"control\":\"external\"} to receive {\"type\":\"observation\",\"id\":N,\"observation\":{...}} on each of its turns. The observation contains only that seat's notes, public board and wall state, rules, goal, move history, both public standings, and the complete legalMoves array. Reply with {\"type\":\"action\",\"id\":N,\"move\":\"<exact legal move>\"}; the game checks turn, id, and legality before applying it. Invalid replies count toward illegalReplies; a missing reply falls back to tactician. Existing prompt and scripted players send {\"type\":\"prompt\",\"prompt\":\"...\",\"scripted\":false|\"tactician\"|\"hustler\"} and continue to receive redacted state frames. Every player receives final scores and exits. PLAYER_JEV=1 selects the bundled external Jev policy; PLAYER_PROMPT supplies optional guidance. PLAYER_SCRIPTED=tactician|hustler selects a baseline."
+        "value": "gauntlet.player.v2 uses JSON text frames over COWORLD_PLAYER_WS_URL (?slot=N&token=T). On connect the game sends welcome with protocol, slot, alias, game, size, and caps. A player registers with {\"type\":\"register\",\"control\":\"external\"} to receive {\"type\":\"observation\",\"id\":N,\"observation\":{...}} on each of its turns. The observation contains only that seat's notes, public board and wall state, rules, goal, move history, both public standings, and the complete legalMoves array. Reply with {\"type\":\"action\",\"id\":N,\"move\":\"<exact legal move>\"}; the game checks turn, id, and legality before applying it. Invalid replies count toward illegalReplies; a missing reply falls back to tactician. Existing prompt and scripted players send {\"type\":\"prompt\",\"prompt\":\"...\",\"scripted\":false|\"tactician\"|\"hustler\"} and continue to receive redacted state frames. Every player receives final scores and exits. PLAYER_PROMPT supplies prompt strategy. PLAYER_SCRIPTED=tactician|hustler selects a baseline."
       },
       "global": {
         "type": "text",
@@ -354,7 +354,7 @@
     "docs": {
       "readme": {
         "type": "text",
-        "value": "Board Gauntlet rotates Connect Four, Breakthrough, Hex, and Quoridor across episodes. Seats alternate and scores are +1, 0, or -1. The acting seat receives public board state, move history, both standings, and the complete legal-move set. External policies register through gauntlet.player.v2 and return a legal move. The same player image runs Jev through System One with PLAYER_JEV=1. Prompt policies use PLAYER_PROMPT for server-side Claude decisions. PLAYER_SCRIPTED=tactician or hustler selects a deterministic baseline. The rules, coordinates, move notation, standing heuristic, and endings are in rules.md. The replay eval bar shows this repository's own heuristic."
+        "value": "Board Gauntlet rotates Connect Four, Breakthrough, Hex, and Quoridor across episodes. Seats alternate and scores are +1, 0, or -1. The acting seat receives public board state, move history, both standings, and the complete legal-move set. External policies register through gauntlet.player.v2 and return a legal move. Prompt policies use PLAYER_PROMPT for server-side Claude decisions. PLAYER_SCRIPTED=tactician or hustler selects a deterministic baseline. The rules, coordinates, move notation, standing heuristic, and endings are in rules.md. The replay eval bar shows this repository's own heuristic."
       },
       "pages": [
         {
