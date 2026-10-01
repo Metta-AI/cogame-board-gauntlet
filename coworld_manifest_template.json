@@ -26,9 +26,7 @@
       "run": [
         "/bin/board-gauntlet"
       ],
-      "env": {
-        "ANTHROPIC_API_KEY_URI": "secret://coworld/board-gauntlet/anthropic_api_key"
-      },
+      "env": {},
       "source_url": "https://github.com/Metta-AI/cogame-board-gauntlet/tree/main"
     },
     "config_schema": {
