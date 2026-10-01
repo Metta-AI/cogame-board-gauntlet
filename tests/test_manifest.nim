@@ -150,9 +150,8 @@ suite "upload contract":
     ## Without this the secret never resolves and every hosted episode
     ## silently plays scripted (hive, 2026-08-23). The namespace is
     ## game.name.
-    let uri = game["runnable"]["env"]["ANTHROPIC_API_KEY_URI"].getStr()
-    check uri == "secret://coworld/" & Slug & "/anthropic_api_key"
-    check uri.split('/')[3] == game["name"].getStr()
+    doAssert game{"runnable"}{"env"}{"ANTHROPIC_API_KEY_URI"}.isNil,
+      "hosted LLM uses the platform sidecar without provider secrets"
 
   test "every bundled player is complete and asks for a whole cpu":
     ## The bundled minimum for `cpu` is "1"; 500m is rejected at upload
