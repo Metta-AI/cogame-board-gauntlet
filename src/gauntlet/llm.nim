@@ -16,8 +16,9 @@
 ## offline certification still completes - this fallback is load-bearing.
 
 import
-  std/[json, os, strutils],
+  std/[json, options, os, strutils, times],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   sim
 from games/connect_four import nil
@@ -42,6 +43,7 @@ type
     scripted*: bool   ## decided by a baseline rather than by the model
     fellBack*: bool   ## an LLM decision was attempted and failed
     illegal*: bool    ## the reply parsed but did not name a legal move
+    nativeAttempts*: seq[DecisionAttempt]
 
   Baseline* = enum
     blTactician = "tactician"
@@ -534,12 +536,17 @@ proc extractJsonObject(text: string): JsonNode =
       cleanText(text, MaxErrorLen))
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, system, user: string, slot: int): string =
+proc completeText(client: LlmClient, system, user: string, slot: int,
+    evidence: var DecisionAttempt): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
+  let temperature = parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "1"))
+  if not (temperature >= 0 and temperature <= 1):
+    raise newException(ValueError, "COWORLD_LLM_TEMPERATURE must be finite and between 0 and 1")
+  body["temperature"] = %temperature
   var headers: HttpHeaders
   headers["content-type"] = "application/json"
   if client.transport == ltSidecar and slot >= 0:
@@ -563,7 +570,25 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
+  evidence.request = copy(body)
+  evidence.model = some(client.model)
+  evidence.decoder = %*{"temperature": (if body.hasKey("temperature"): body["temperature"] else: newJNull()),
+    "max_tokens": client.maxOutputTokens, "timeout_ms": client.timeoutSeconds * 1000}
+  let started = epochTime()
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
+  evidence.latencyMs = some((epochTime() - started) * 1000)
+  evidence.rawResponse = %response.body
+  for (header, field) in [
+      ("x-softmax-llm-call-id", "call"),
+      ("x-coworld-checkpoint-sha256", "model"),
+      ("x-coworld-tokenizer-sha256", "tokenizer"),
+      ("x-coworld-chat-template-sha256", "template")]:
+    if response.headers[header].len > 0:
+      case field
+      of "call": evidence.platformCallId = some(response.headers[header])
+      of "model": evidence.modelIdentity = some(response.headers[header])
+      of "tokenizer": evidence.tokenizerIdentity = some(response.headers[header])
+      of "template": evidence.chatTemplateSha256 = some(response.headers[header])
   if response.code == 401 or response.code == 403:
     let detail = response.body[0 .. min(response.body.high, 400)]
     if "Model access is denied" in response.body and
@@ -581,6 +606,24 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
     raise newException(GauntletError, "anthropic error " & $response.code &
       ": " & response.body[0 .. min(response.body.high, 300)])
   let payload = parseJson(response.body)
+  evidence.model = some(payload["model"].getStr())
+  evidence.rawResponse = payload
+  evidence.stopReason = some(payload["stop_reason"].getStr())
+  evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
+  evidence.outputTokens = some(payload["usage"]["output_tokens"].getInt())
+  if payload.hasKey("sampling_evidence") and payload["sampling_evidence"].kind != JNull:
+    let sampled = payload["sampling_evidence"]
+    var promptTokens, completionTokens: seq[int]
+    var probabilities: seq[float]
+    for token in sampled["prompt_token_ids"]: promptTokens.add(token.getInt())
+    for token in sampled["completion_token_ids"]: completionTokens.add(token.getInt())
+    if sampled["behavior_log_probs"].kind != JNull:
+      for probability in sampled["behavior_log_probs"]: probabilities.add(probability.getFloat())
+    evidence.promptTokenIds = some(promptTokens)
+    evidence.sampledTokenIds = some(completionTokens)
+    if sampled["behavior_log_probs"].kind != JNull:
+      evidence.behaviorLogprobs = some(probabilities)
+    evidence.stopReason = some(sampled["stop_reason"].getStr())
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(GauntletError, "anthropic refusal")
   for contentBlock in payload["content"]:
@@ -612,7 +655,7 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
     return Decision(move: scriptedMove(sim, parseBaseline(baseline)),
       scripted: true)
   if client.isNil or client.disabled:
-    return Decision(move: scriptedMove(sim, blTactician), scripted: true)
+    return Decision(move: scriptedMove(sim, blTactician), fellBack: true)
   let seat = sim.mover
   let system = systemPrompt(sim, seat)
   var illegal = false
@@ -622,22 +665,36 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
       user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
         "the requested JSON object; `move` must be exactly one of the " &
         "strings in this list: " & sim.legalMoves().join(" "))
+    var evidence = newDecisionAttempt("ply-" & $sim.plies & "-attempt-" & $attempt,
+      client.model, aoModel)
+    evidence.prompt = %*[{"role": "system", "content": system},
+      {"role": "user", "content": user}]
+    var text = ""
     try:
-      var decision = sim.parseReply(
-        extractJsonObject(client.completeText(system, user, seat)))
+      text = client.completeText(system, user, seat, evidence)
+      var decision = sim.parseReply(extractJsonObject(text))
       ## Reject an illegal move HERE so the retry carries the printed set,
       ## computed by the same predicate the validator applies.
       var probe = sim
       probe.applyMove(decision.move, "", "", false, false)
+      evidence.response = %text
+      evidence.parsedAction = %*{"move": decision.move, "say": decision.say, "notes": decision.notes}
+      evidence.accepted = true
+      result.nativeAttempts.add(evidence)
+      decision.nativeAttempts = result.nativeAttempts
       return decision
     except CatchableError as error:
+      evidence.response = %text
+      evidence.rejectionReason = some(error.msg)
+      result.nativeAttempts.add(evidence)
       if "is not a legal" in error.msg or "does not name a" in error.msg:
         illegal = true
-      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt,
-        " failed: ", cleanText(error.msg, MaxErrorLen)
+      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt, " failed"
       if client.disabled:
         break
   echo "board-gauntlet llm: seat ", seat, " falling back to the tactician ",
     "baseline"
-  Decision(move: scriptedMove(sim, blTactician), scripted: false,
-    fellBack: true, illegal: illegal)
+  result.move = scriptedMove(sim, blTactician)
+  result.scripted = false
+  result.fellBack = true
+  result.illegal = illegal

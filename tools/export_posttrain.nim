@@ -1,8 +1,7 @@
-## Export complete scripted games as Metta post-training examples.
-## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT EPISODES [FIRST_SEED]
-
+## Export authoritative private complete episodes, with full control provenance.
 import std/[json, os, osproc, random, strutils]
-import gauntlet/[sim, llm]
+import bitworld/decision_trajectory
+import gauntlet/[sim, llm, training]
 
 const OperatorPrompt = "Play to win. Copy one legal move exactly."
 
@@ -13,86 +12,63 @@ when isMainModule:
   let output = args[0]
   let episodes = parseInt(args[1])
   let firstSeed = if args.len == 3: parseInt(args[2]) else: 0
-  if episodes < 20:
-    quit("at least 20 episodes cover each board in both splits", 1)
-  if firstSeed < 0:
-    quit("first seed must be nonnegative", 1)
-  if dirExists(output) or fileExists(output):
-    quit("output already exists: " & output, 1)
+  doAssert episodes >= 20 and firstSeed >= 0
+  doAssert not dirExists(output) and not fileExists(output)
+  doAssert execProcess("git status --porcelain").strip().len == 0,
+    "Commit the qualified source before generating a pinned training corpus"
   createDir(output)
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
-  var
-    trainRows: seq[string]
-    validationRows: seq[string]
-    runs = newJArray()
+  var runs = newJArray()
   for seed in firstSeed ..< firstSeed + episodes:
     var config = defaultGameConfig()
     config.seed = seed
     let tacticianSeat = seed mod 2
-    config.players = @[
-      PlayerConfig(name: if tacticianSeat == 0: "tactician" else: "hustler"),
-      PlayerConfig(name: if tacticianSeat == 1: "tactician" else: "hustler")
-    ]
+    config.players = @[PlayerConfig(name: "teacher0"), PlayerConfig(name: "teacher1")]
     config.tokens = @["training-seat-0", "training-seat-1"]
     config = sampleEpisode(config)
     var sim = initSim(config)
     let openingPlies = seed mod 6
     var rng = initRand(int64(seed) * 1009 + 7)
-    var count = 0
+    let episodeId = "board-gauntlet-" & $seed
+    let trajectory = newDecisionTrajectory(episodeId, episodeId,
+      "board-gauntlet", "source-" & sourceRevision, sourceRevision)
+    var selectedDecisionIds: seq[string]
     while not sim.done:
-      let mover = sim.mover
-      let baseline = if mover == tacticianSeat: blTactician else: blHustler
-      var move: string
+      let before = sim
+      let baseline = if sim.mover == tacticianSeat: blTactician else: blHustler
+      var decision: Decision
+      var policy: string
       if sim.plies < openingPlies:
         let legal = sim.legalMoves()
-        move = legal[rng.rand(legal.high)]
+        decision.move = legal[rng.rand(legal.high)]
+        policy = "seeded-random-opening"
       else:
-        move = scriptedMove(sim, baseline)
-        if mover == tacticianSeat:
-          let row = %*{
-            "episode_id": "board-gauntlet-" & $seed,
-            "seed": "board-gauntlet-" & $seed,
-            "decision_id": sim.plies,
-            "prompt": [
-              {"role": "system", "content": sim.systemPrompt(mover)},
-              {"role": "user", "content": sim.userPrompt(mover, OperatorPrompt)}
-            ],
-            "completion": [{"role": "assistant", "content": $(%*{
-              "move": move, "say": "", "notes": ""
-            })}],
-            "game": "board-gauntlet",
-            "action_schema_revision": "gauntlet-move-v1"
-          }
-          if seed mod 5 == 0:
-            validationRows.add($row)
-          else:
-            trainRows.add($row)
-          inc count
-      sim.applyMove(move, "", "", true, false)
+        decision.move = scriptedMove(sim, baseline)
+        decision.scripted = true
+        policy = "scripted-" & $baseline
+        if sim.mover == tacticianSeat:
+          selectedDecisionIds.add("gauntlet-" & $sim.plies)
+      # Validate the exact ordinary client payload before applying it.
+      let parsed = sim.parseReply(decision.decisionAction())
+      doAssert parsed.move == decision.move
+      sim.applyMove(parsed.move, parsed.say, parsed.notes, decision.scripted, false)
+      trajectory.recordAppliedDecision(before, decision, decision,
+        OperatorPrompt, policy, sim.done)
     let results = sim.resultsJson()
     doAssert results["reason"].getStr() == "complete"
-    runs.add(%*{
-      "seed": seed,
-      "game": $sim.config.game,
-      "tactician_seat": tacticianSeat,
-      "opening_plies": openingPlies,
-      "examples": count,
-      "results": results
-    })
-  if trainRows.len == 0 or validationRows.len == 0:
-    quit("both splits need labelled decisions", 1)
-  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
-  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  let manifest = %*{
-    "schema_version": 1,
-    "game": "board-gauntlet",
-    "source_revision": sourceRevision,
-    "teacher": "tactician",
-    "opponent": "hustler",
-    "operator_prompt": OperatorPrompt,
-    "train_examples": trainRows.len,
-    "validation_examples": validationRows.len,
-    "runs": runs
-  }
-  writeFile(output / "manifest.json", pretty(manifest) & "\n")
-  echo "train=", trainRows.len, " validation=", validationRows.len
+    var participants = newJObject()
+    for seat in 0 ..< results["scores"].len:
+      participants[$seat] = %*{"score": results["scores"][seat]}
+    trajectory.finish(esCompleted, results, participants)
+    let split = if seed mod 5 == 0: "validation" else: "train"
+    trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
+    runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "game": $sim.config.game,
+      "teacher_seat": tacticianSeat, "opening_plies": openingPlies,
+      "decisions": sim.plies, "selected_decision_ids": selectedDecisionIds, "results": results})
+  writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
+    "format": "coworld-private-complete-episodes-v1", "game": "board-gauntlet",
+    "source_revision": sourceRevision, "teacher_policy": "scripted-tactician",
+    "opponent_policy": "scripted-hustler", "operator_prompt": OperatorPrompt,
+    "runs": runs}) & "\n")
+  echo "complete episodes=", episodes

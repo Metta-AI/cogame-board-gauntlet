@@ -21,12 +21,14 @@
 ## variant would have to issue them as one parallel batch instead.
 
 import
-  std/[json, locks, os, sets, strutils, tables, times],
+  std/[json, locks, options, os, sets, strutils, tables, times],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   mummy,
   mummy/routers,
   llm,
+  training,
   observation,
   sim
 
@@ -57,6 +59,7 @@ type
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
+    trajectory: Option[DecisionTrajectory]
 
 var
   stateLock: Lock
@@ -90,7 +93,7 @@ proc policyNamesJson(gs: GameState): JsonNode =
 proc snapshotJson(gs: GameState): JsonNode =
   var events = newJArray()
   for event in gs.sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   var connected = newJArray()
   for slot in 0 ..< gs.config.tokens.len:
     connected.add(%gs.playerSockets.hasKey(slot))
@@ -169,7 +172,7 @@ proc replayPayload(gs: GameState, results: JsonNode): string =
     names.add(%name)
   var events = newJArray()
   for event in gs.sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   $ %*{
     "protocol": ReplayProtocol,
     "names": names,
@@ -193,6 +196,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if state.trajectory.isSome:
+      var outcomes = newJObject()
+      for seat in 0 ..< results["scores"].len:
+        outcomes[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.get().finish(
+        if results["reason"].getStr() == "complete": esCompleted else: esTruncated,
+        results, outcomes)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -337,10 +348,13 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         withLock stateLock:
           state.pendingSeat = -1
           state.pendingMove = ""
-          if move.len > 0:
-            state.sim.applyMove(move, "", "", false, false)
-          else:
-            state.sim.applyMove(tacticianMove(state.sim), "", "", false, true)
+          let proposed = Decision(move: move)
+          let applied = if move.len > 0: proposed
+            else: Decision(move: tacticianMove(state.sim), fellBack: true)
+          state.sim.applyMove(applied.move, "", "", false, applied.fellBack)
+          if state.trajectory.isSome:
+            state.trajectory.get().recordAppliedDecision(simCopy, proposed,
+              applied, seatPrompt, "external-gauntlet", state.sim.done)
           echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
             " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
             (epochTime() - gameStart).int, "s"
@@ -362,6 +376,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
       let decision = client.decide(simCopy, seatPrompt, seatBaseline)
+      var applied = decision
 
       withLock stateLock:
         if decision.illegal:
@@ -370,11 +385,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(decision.move, decision.say, decision.notes,
             decision.scripted, decision.fellBack)
         except GauntletError as error:
-          echo "board-gauntlet: move rejected (",
-            cleanText(error.msg, MaxErrorLen),
-            "); falling back to the tactician baseline"
-          let fallback = tacticianMove(state.sim)
-          state.sim.applyMove(fallback, "", "", false, true)
+          echo "board-gauntlet: move rejected; falling back to the tactician baseline"
+          applied = Decision(move: tacticianMove(state.sim), fellBack: true)
+          state.sim.applyMove(applied.move, "", "", false, true)
+        if state.trajectory.isSome:
+          state.trajectory.get().recordAppliedDecision(simCopy, decision,
+            applied, seatPrompt, "scripted-" & seatBaseline, state.sim.done)
         echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
           " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
           (epochTime() - gameStart).int, "s"
@@ -543,8 +559,7 @@ proc websocketHandler(
               else:
                 inc state.sim.illegalReplies[slot]
       except CatchableError as error:
-        echo "board-gauntlet: ignoring bad player frame: ",
-          cleanText(error.msg, MaxErrorLen)
+        echo "board-gauntlet: rejected player frame for seat ", slot
     of ErrorEvent:
       discard
     of CloseEvent:
@@ -623,6 +638,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(GauntletError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "gauntlet-" & $config.seed, "board-gauntlet",
+      getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.baselines = newSeq[string](config.players.len)
   state.pendingSeat = -1
