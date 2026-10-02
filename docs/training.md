@@ -1,41 +1,51 @@
-# Training on Board Gauntlet
+# Private language training
 
-Board Gauntlet makes decisions inside the game server from a player-supplied
-prompt. The player socket does not accept moves. Its supported training path
-is to learn from the same system and user prompts the server sends to its
-language model. It does not expose numeric steps for Metta RL or PufferLib.
+The ordinary hosted game owns language requests, prompt construction, reply
+normalization, and action application. Training uses that exact path.
+The native Messages endpoint is `COWORLD_LLM_ENDPOINT`; set
+`COWORLD_LLM_MODEL` to a registered `checkpoint/<artifact-sha256>` identity.
+`COWORLD_LLM_TEMPERATURE` explicitly selects temperature from 0 through 1;
+when absent, the provider default remains unchanged. Saved players and the
+verified learner gateway must use the same sampling policy and token budgets.
+A player cannot choose its own checkpoint URL or serving identity.
 
-The exporter runs complete games through the production Nim simulator. The
-`tactician` baseline supplies labels, the `hustler` baseline supplies an
-opponent, and seeded random opening plies vary the positions. Opening moves
-are not training targets. Consecutive seeds rotate through Connect Four,
-Breakthrough, Hex, and Quoridor. Whole games go to one split by seed.
+To capture private hosted evidence, supply `COboard-gauntlet_SAVE_TRAJECTORY_URI`,
+`COWORLD_EPISODE_ID`, `COWORLD_board-gauntlet_VERSION`, and `COWORLD_SOURCE_REVISION`.
+The game records every native attempt, retry, platform call ID, and actual
+executed action. Missing credentials or invalid replies produce consumed
+fallbacks, which are excluded from model learning targets. Terminal outcomes
+and all seats remain in the private episode. Public replay contains no new
+training prompts or native responses. Private corpora are excluded from image
+build contexts and must never be published as replay artifacts.
 
-After syncing `nimby.lock` as described in the [README](../README.md), run:
-
-```sh
-nim c --path:src --out:out/export-posttrain tools/export_posttrain.nim
-out/export-posttrain /tmp/board-gauntlet-dataset 100
-```
-
-The output contains `train.jsonl`, `validation.jsonl`, and `manifest.json`.
-Each row matches the Metta post-training `Example` schema: the exact game
-prompt and a JSON move the simulator accepted. The manifest records the
-source revision, game seeds, final scores, teacher seat, and example counts.
-At least 20 consecutive episodes give both splits every board.
-The prompts use `PLAYER_PROMPT="Play to win. Copy one legal move exactly."`.
-
-From a Metta checkout with `metta-posttrain` installed:
+After syncing `nimby.lock`, commit the qualified source and run:
 
 ```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/board-gauntlet-dataset \
-  --output /tmp/board-gauntlet-posttrain-run \
-  --model MODEL_OR_PATH --max-steps 1000 --max-length 2048
+nim c --path:src --out:/tmp/export-posttrain tools/export_posttrain.nim
+/tmp/export-posttrain /tmp/board-gauntlet-private-corpus 20
+python3 tests/test_training_corpus.py /tmp/board-gauntlet-private-corpus
 ```
 
-Check `train_overlength` and `validation_overlength` in the optimizer
-manifest for the selected tokenizer. This dataset imitates the scripted
-teacher; it does not measure model win rate. The server currently calls its
-configured Anthropic or Bedrock provider, so fielding a trained model needs
-that provider to serve it.
+The definitive format is `coworld-private-complete-episodes-v1`: one complete
+episode per file under `train/` or `validation/`, plus `manifest.json`.
+Directories are private and episode files are created exclusively with mode
+0600. Existing outputs are never overwritten. The manifest records exact
+source revision, seed, outcome, target policy, and selected decision IDs.
+Opponent decisions and all attempts remain available as evidence; they are
+not implicitly teacher labels.
+
+From the shared Metta checkout, import complete episodes with an explicit
+policy selection using `metta-posttrain export-hosted SOURCE OUTPUT
+--policy scripted-tactician`. Use `coworld training qualify EVENTS --transport local
+--policy scripted-tactician` to qualify raw hosted event streams before training.
+This corpus supports supervised fine-tuning of the named teacher. It does
+not establish checkpoint game strength or reinforcement learning readiness.
+Reinforcement learning also requires real sampled token IDs and draw-time
+behavior log probabilities from the owned serving engine. Greedy responses
+and teacher labels do not supply those probabilities.
+
+Consecutive seeds rotate Connect Four, Breakthrough, Hex, and Quoridor.
+The tactician seat alternates by seed; the hustler is the opponent. Seeded
+random opening plies remain in the episode and are excluded from targets.
+At least 20 episodes cover every board in both whole-episode splits.
+The numeric bridge is a separate research interface, not this hosted path.
