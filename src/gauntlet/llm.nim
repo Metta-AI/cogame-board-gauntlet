@@ -543,11 +543,10 @@ proc completeText(client: LlmClient, system, user: string, slot: int,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
-  let temperature = getEnv("COWORLD_LLM_TEMPERATURE")
-  if temperature.len > 0:
-    let configured = parseFloat(temperature)
-    doAssert configured >= 0 and configured <= 1
-    body["temperature"] = %configured
+  let temperature = parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "1"))
+  if not (temperature >= 0 and temperature <= 1):
+    raise newException(ValueError, "COWORLD_LLM_TEMPERATURE must be finite and between 0 and 1")
+  body["temperature"] = %temperature
   var headers: HttpHeaders
   headers["content-type"] = "application/json"
   if client.transport == ltSidecar and slot >= 0:
@@ -607,6 +606,7 @@ proc completeText(client: LlmClient, system, user: string, slot: int,
     raise newException(GauntletError, "anthropic error " & $response.code &
       ": " & response.body[0 .. min(response.body.high, 300)])
   let payload = parseJson(response.body)
+  evidence.model = some(payload["model"].getStr())
   evidence.rawResponse = payload
   evidence.stopReason = some(payload["stop_reason"].getStr())
   evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
@@ -689,8 +689,7 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
       result.nativeAttempts.add(evidence)
       if "is not a legal" in error.msg or "does not name a" in error.msg:
         illegal = true
-      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt,
-        " failed: ", cleanText(error.msg, MaxErrorLen)
+      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt, " failed"
       if client.disabled:
         break
   echo "board-gauntlet llm: seat ", seat, " falling back to the tactician ",

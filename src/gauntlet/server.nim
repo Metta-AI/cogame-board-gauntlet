@@ -385,9 +385,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(decision.move, decision.say, decision.notes,
             decision.scripted, decision.fellBack)
         except GauntletError as error:
-          echo "board-gauntlet: move rejected (",
-            cleanText(error.msg, MaxErrorLen),
-            "); falling back to the tactician baseline"
+          echo "board-gauntlet: move rejected; falling back to the tactician baseline"
           applied = Decision(move: tacticianMove(state.sim), fellBack: true)
           state.sim.applyMove(applied.move, "", "", false, true)
         if state.trajectory.isSome:
@@ -561,8 +559,7 @@ proc websocketHandler(
               else:
                 inc state.sim.illegalReplies[slot]
       except CatchableError as error:
-        echo "board-gauntlet: ignoring bad player frame: ",
-          cleanText(error.msg, MaxErrorLen)
+        echo "board-gauntlet: rejected player frame for seat ", slot
     of ErrorEvent:
       discard
     of CloseEvent:
