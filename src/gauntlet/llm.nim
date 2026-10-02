@@ -16,7 +16,8 @@
 ## offline certification still completes - this fallback is load-bearing.
 
 import
-  std/[json, os, strutils],
+  std/[json, options, os, strutils],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   sim
@@ -36,6 +37,7 @@ const
 
 type
   Decision* = object
+    nativeAttempts*: seq[DecisionAttempt]
     move*: string
     say*: string
     notes*: string
@@ -524,7 +526,7 @@ proc userPrompt*(sim: Sim, seat: int, operatorPrompt: string): string =
 
 # ---- Anthropic / Bedrock transport ------------------------------------------
 
-proc extractJsonObject(text: string): JsonNode =
+proc extractJsonObject*(text: string): JsonNode =
   ## Pulls the first {...} object out of a model response, tolerating
   ## fences and trailing prose.
   let start = text.find('{')
@@ -534,9 +536,10 @@ proc extractJsonObject(text: string): JsonNode =
       cleanText(text, MaxErrorLen))
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, system, user: string, slot: int): string =
+proc completeText(client: LlmClient, system, user: string, slot: int, evidence: var DecisionAttempt): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
+    "temperature": 0,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
@@ -563,7 +566,12 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
+  captureInferenceRequest(evidence, body, system, user)
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
+  captureInferenceResponse(evidence, response.body, response.code,
+    response.headers["x-softmax-llm-call-id"], response.headers["x-coworld-checkpoint-sha256"],
+    response.headers["x-coworld-tokenizer-sha256"], response.headers["x-coworld-chat-template-sha256"],
+    client.timeoutSeconds, 2)
   if response.code == 401 or response.code == 403:
     let detail = response.body[0 .. min(response.body.high, 400)]
     if "Model access is denied" in response.body and
@@ -612,25 +620,34 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
     return Decision(move: scriptedMove(sim, parseBaseline(baseline)),
       scripted: true)
   if client.isNil or client.disabled:
-    return Decision(move: scriptedMove(sim, blTactician), scripted: true)
+    return Decision(move: scriptedMove(sim, blTactician), scripted: true, fellBack: true)
   let seat = sim.mover
   let system = systemPrompt(sim, seat)
   var illegal = false
+  var retained: seq[DecisionAttempt]
   for attempt in 0 .. 1:
+    var evidence = newDecisionAttempt("attempt-" & $attempt, client.model, aoModel)
+    var raw = ""
     var user = sim.userPrompt(seat, operatorPrompt)
     if attempt > 0:
       user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
         "the requested JSON object; `move` must be exactly one of the " &
         "strings in this list: " & sim.legalMoves().join(" "))
     try:
-      var decision = sim.parseReply(
-        extractJsonObject(client.completeText(system, user, seat)))
+      raw = client.completeText(system, user, seat, evidence)
+      var decision = sim.parseReply(extractJsonObject(raw))
       ## Reject an illegal move HERE so the retry carries the printed set,
       ## computed by the same predicate the validator applies.
       var probe = sim
       probe.applyMove(decision.move, "", "", false, false)
+      evidence.response = %raw
+      evidence.accepted = true
+      decision.nativeAttempts = retained & @[evidence]
       return decision
     except CatchableError as error:
+      evidence.response = %raw
+      evidence.rejectionReason = some(error.msg)
+      retained.add(evidence)
       if "is not a legal" in error.msg or "does not name a" in error.msg:
         illegal = true
       echo "board-gauntlet llm: seat ", seat, " attempt ", attempt,
@@ -640,4 +657,4 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
   echo "board-gauntlet llm: seat ", seat, " falling back to the tactician ",
     "baseline"
   Decision(move: scriptedMove(sim, blTactician), scripted: false,
-    fellBack: true, illegal: illegal)
+    fellBack: true, illegal: illegal, nativeAttempts: retained)

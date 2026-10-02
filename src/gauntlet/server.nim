@@ -21,7 +21,8 @@
 ## variant would have to issue them as one parallel batch instead.
 
 import
-  std/[json, locks, os, sets, strutils, tables, times],
+  std/[json, locks, options, os, sets, strutils, tables, times],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   mummy,
@@ -43,6 +44,7 @@ const
 
 type
   GameState = object
+    trajectory: Option[DecisionTrajectory]
     config: GameConfig
     sim: Sim
     prompts: seq[string]
@@ -52,6 +54,7 @@ type
     decisionId: int
     pendingSeat: int
     pendingMove: string
+    pendingAttempts: seq[DecisionAttempt]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -218,6 +221,12 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       socket.send($final)
     state.broadcastLocked()
 
+  if state.trajectory.isSome:
+    state.trajectory.get().finish(
+      (if state.sim.reason == "deadline": esTruncated else: esCompleted),
+      results, results["scores"])
+    state.trajectory.get().writeEventsToUri(getEnv("COGAME_SAVE_TRAJECTORY_URI"))
+
   sleep(500)
   echo "board-gauntlet: writing results and replay"
   writeArtifact(
@@ -321,6 +330,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           inc state.decisionId
           state.pendingSeat = mover
           state.pendingMove = ""
+          state.pendingAttempts = @[]
           state.playerSockets[mover].send($ %*{
             "type": "observation",
             "id": state.decisionId,
@@ -341,6 +351,13 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             state.sim.applyMove(move, "", "", false, false)
           else:
             state.sim.applyMove(tacticianMove(state.sim), "", "", false, true)
+          if state.trajectory.isSome:
+            state.trajectory.get().recordExecutedDecision($simCopy.plies, $mover,
+              config.players[mover].name, %*{"view": simCopy.playerObservation(mover), "operator_prompt": seatPrompt, "control": "external"},
+              %*{"move": state.sim.lastMove}, state.pendingAttempts,
+              (if move.len == 0: aoFallback
+               elif state.pendingAttempts.len > 0: aoModel else: aoUnknown),
+              terminal = state.sim.done)
           echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
             " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
             (epochTime() - gameStart).int, "s"
@@ -366,6 +383,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         if decision.illegal:
           inc state.sim.illegalReplies[mover]
+        var engineRejected = false
         try:
           state.sim.applyMove(decision.move, decision.say, decision.notes,
             decision.scripted, decision.fellBack)
@@ -373,8 +391,20 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           echo "board-gauntlet: move rejected (",
             cleanText(error.msg, MaxErrorLen),
             "); falling back to the tactician baseline"
+          engineRejected = true
           let fallback = tacticianMove(state.sim)
           state.sim.applyMove(fallback, "", "", false, true)
+        if state.trajectory.isSome:
+          let origin =
+            if engineRejected or decision.fellBack: aoFallback
+            elif decision.nativeAttempts.len > 0: aoModel
+            else: aoTeacher
+          state.trajectory.get().recordExecutedDecision($simCopy.plies, $mover,
+            config.players[mover].name, %*{"view": simCopy.playerObservation(mover), "operator_prompt": seatPrompt, "control": "internal"},
+            %*{"move": state.sim.lastMove, "say": (if engineRejected: "" else: decision.say),
+              "notes": (if engineRejected: "" else: decision.notes)},
+            decision.nativeAttempts, origin, systemPrompt(simCopy, mover),
+            userPrompt(simCopy, mover, seatPrompt), state.sim.done)
         echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
           " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
           (epochTime() - gameStart).int, "s"
@@ -539,6 +569,9 @@ proc websocketHandler(
             if state.external[slot] and state.pendingSeat == slot and
                 state.decisionId == id and state.pendingMove.len == 0:
               if state.sim.isLegalMove(move):
+                if payload.hasKey("attempts"):
+                  for attempt in payload["attempts"]:
+                    state.pendingAttempts.add(readAttemptEvidence(attempt))
                 state.pendingMove = move
               else:
                 inc state.sim.illegalReplies[slot]
@@ -623,6 +656,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(GauntletError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv("COGAME_SAVE_TRAJECTORY_URI").len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      $config.seed, "gauntlet", getEnv("COWORLD_GAME_VERSION"),
+      getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.baselines = newSeq[string](config.players.len)
   state.pendingSeat = -1
