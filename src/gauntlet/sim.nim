@@ -433,7 +433,6 @@ proc boardStateJson*(sim: Sim): JsonNode =
       "wallsLeft": sim.wallsLeft[seat],
       "score": sim.score(seat),
       "say": sim.says[seat],
-      "notes": sim.notes[seat],
       "scripted": sim.scripted[seat],
       "fellBack": sim.fellBack[seat],
       "readout": sim.readout(seat)
@@ -510,6 +509,12 @@ proc eventToJson*(event: GameEvent): JsonNode =
     for value in event.standing:
       standings.add(%value)
     result["standing"] = standings
+
+proc publicEventJson*(event: GameEvent): JsonNode =
+  ## New public artifacts omit private notes; stored event readers stay intact.
+  result = event.eventToJson()
+  if event.kind == evMove:
+    result.delete("notes")
 
 proc eventFromJson*(node: JsonNode): GameEvent =
   result = GameEvent(

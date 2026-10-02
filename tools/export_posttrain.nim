@@ -63,7 +63,7 @@ when isMainModule:
     trajectory.finish(esCompleted, results, participants)
     let split = if seed mod 5 == 0: "validation" else: "train"
     trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
-    runs.add(%*{"seed": seed, "split": split, "game": $sim.config.game,
+    runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "game": $sim.config.game,
       "teacher_seat": tacticianSeat, "opening_plies": openingPlies,
       "decisions": sim.plies, "selected_decision_ids": selectedDecisionIds, "results": results})
   writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
