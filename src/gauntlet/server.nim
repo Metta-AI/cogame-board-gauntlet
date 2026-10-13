@@ -628,7 +628,7 @@ proc runReplayServer*(runtimeConfig: RuntimeConfig) =
   replayPayloadGlobal = $enriched
 
   let router = buildRouter(replayMode = true)
-  gameServer = newServer(router, websocketHandler)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4)
   echo "board-gauntlet: replay mode on ", runtimeConfig.host, ":",
     runtimeConfig.port
   gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
@@ -647,7 +647,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.pendingSeat = -1
 
   let router = buildRouter(replayMode = false)
-  gameServer = newServer(router, websocketHandler)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4)
   createThread(gameThread, runGame, runtimeConfig)
   echo "board-gauntlet: serving on ", runtimeConfig.host, ":",
     runtimeConfig.port
