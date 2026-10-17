@@ -9,8 +9,8 @@ when absent, the provider default remains unchanged. Saved players and the
 verified learner gateway must use the same sampling policy and token budgets.
 A player cannot choose its own checkpoint URL or serving identity.
 
-To capture private hosted evidence, supply `COboard-gauntlet_SAVE_TRAJECTORY_URI`,
-`COWORLD_EPISODE_ID`, `COWORLD_board-gauntlet_VERSION`, and `COWORLD_SOURCE_REVISION`.
+To capture private hosted evidence, supply `COGAME_SAVE_TRAJECTORY_URI`,
+`COWORLD_EPISODE_ID`, `COWORLD_GAME_VERSION`, and `COWORLD_SOURCE_REVISION`.
 The game records every native attempt, retry, platform call ID, and actual
 executed action. Missing credentials or invalid replies produce consumed
 fallbacks, which are excluded from model learning targets. Terminal outcomes
@@ -28,18 +28,37 @@ python3 tests/test_training_corpus.py /tmp/board-gauntlet-private-corpus
 
 The definitive format is `coworld-private-complete-episodes-v1`: one complete
 episode per file under `train/` or `validation/`, plus `manifest.json`.
-Directories are private and episode files are created exclusively with mode
-0600. Existing outputs are never overwritten. The manifest records exact
+Directories are private and episode files are created exclusively with mode 0600. Existing outputs are never overwritten. The manifest records exact
 source revision, seed, outcome, target policy, and selected decision IDs.
 Opponent decisions and all attempts remain available as evidence; they are
 not implicitly teacher labels.
 
-From the shared Metta checkout, import complete episodes with an explicit
-policy selection using `metta-posttrain export-hosted SOURCE OUTPUT
---policy scripted-tactician`. Use `coworld training qualify EVENTS --transport local
---policy scripted-tactician` to qualify raw hosted event streams before training.
-This corpus supports supervised fine-tuning of the named teacher. It does
-not establish checkpoint game strength or reinforcement learning readiness.
+From the shared Metta checkout, validate and combine the episode files:
+
+```sh
+uv run --package metta-posttraining python - <<'PYTHON'
+import os
+from pathlib import Path
+from coworld.decision_trajectory import CompleteEpisode
+
+source = Path("/tmp/board-gauntlet-private-corpus")
+destination = source / "complete-episodes.jsonl"
+paths = sorted(source.glob("train/*.jsonl")) + sorted(source.glob("validation/*.jsonl"))
+assert len(paths) == 20
+with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as output:
+    for path in paths:
+        episode = CompleteEpisode.model_validate_json(path.read_text())
+        output.write(episode.model_dump_json() + "\n")
+PYTHON
+```
+
+The shared `metta_training.posttrain.hosted.export_hosted` importer requires
+external review bound to the combined corpus SHA256 and exact source revision.
+Select `scripted-tactician` explicitly; unreviewed teachers are rejected.
+Combining files preserves evidence and does not approve labels. The importer
+assigns whole seed families to splits, including matched wording variants.
+This corpus supplies candidate imitation data. It does not establish checkpoint
+game strength or reinforcement learning readiness.
 Reinforcement learning also requires real sampled token IDs and draw-time
 behavior log probabilities from the owned serving engine. Greedy responses
 and teacher labels do not supply those probabilities.
@@ -49,3 +68,55 @@ The tactician seat alternates by seed; the hustler is the opponent. Seeded
 random opening plies remain in the episode and are excluded from targets.
 At least 20 episodes cover every board in both whole-episode splits.
 The numeric bridge is a separate research interface, not this hosted path.
+
+## Matched wording collection
+
+Build the bridge and use `board-gauntlet-train-bridge MANIFEST VARIANT --language`
+for text collection. Reset accepts `promptVariant` and `promptSeed`; training
+permits five wordings, including canonical, and rejects held-out selections.
+The numeric interface preserves its canonical messages and action catalog.
+
+The source exporter accepts `OUTPUT EPISODES FIRST_SEED PROMPT_VARIANT PROMPT_SEED`.
+Collect separate private directories with identical scenario seeds for each
+wording. Episode identities include the wording; scenario-family identities
+and train/validation assignment depend only on the scenario seed. Keep the
+original teacher, opponent, and random-opening labels and selected decision IDs.
+Prompt diversity does not turn opponent moves or random openings into targets.
+
+Private observations carry `prompt_template` for the configured context and
+`prompt_attempts` for exact recorded attempt messages, including retries. Native
+attempt records retain their original request, response, origin, and receipt
+fields. Empty fallback attempts are not model-generation evidence.
+
+For evaluation, freeze policies and compare canonical with the two held-out
+wordings using matched scenario seeds, seats, opponents, and ordinary budgets.
+Report scores, invalid actions, fallback, and incomplete episodes. Scripted
+parity establishes mechanical invariance, not improved learning or reduced collapse.
+
+Run the retained full-game wording checks after building the bridge:
+
+```sh
+python3 tools/test_prompt_variants.py /tmp/board-gauntlet-train-bridge
+```
+
+An optional second argument names the original bridge binary for numeric
+comparisons. The panel covers all four rotated games and all four explicit
+board variants, five direct wordings, five mixed selections, exact message
+hashes, private notes, and unchanged legal moves, actions, and outcomes.
+
+The hosted panels use the shipped server and all four ordinary board variants:
+
+```sh
+python3 -m pip install websockets==16.1.1
+python3 tools/test_prompt_socket_games.py GAME_BINARY OUTPUT_DIRECTORY SOURCE_REVISION
+python3 tools/test_prompt_native_games.py GAME_BINARY PLAYER_BINARY OUTPUT_DIRECTORY SOURCE_REVISION
+```
+
+The socket panel runs 48 complete games and compares private prompts, hashes,
+observations, actions, public replays, and results. It stops its server after
+final artifacts are written. The native panel runs 12 complete games through
+both real players and checks natural shutdown, private operator guidance,
+two actual failed requests per decision, retry hashes, and consumed fallbacks.
+Its closed local endpoint uses a one-second request-spacing floor; ordinary
+board sizes, ply caps, wall-clock budgets, and scoring remain unchanged.
+Neither panel measures model quality or replaces published runtime validation.

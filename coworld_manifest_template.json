@@ -160,6 +160,26 @@
           "type": "number",
           "minimum": 0,
           "default": 180
+        },
+        "promptVariant": {
+          "type": "string",
+          "enum": [
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+            "heldout-briefing",
+            "heldout-reference",
+            "mixed"
+          ],
+          "default": "canonical",
+          "description": "Episode-stable rules wording. Held-out variants are evaluation-only. Mixed requires an independent promptSeed."
+        },
+        "promptSeed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Independent wording seed; mixed selects one of five training wordings by seed modulo five. Does not change simulation randomness."
         }
       }
     },
@@ -342,11 +362,11 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "gauntlet.player.v2 uses JSON text frames over COWORLD_PLAYER_WS_URL (?slot=N&token=T). On connect the game sends welcome with protocol, slot, alias, game, size, and caps. A player registers with {\"type\":\"register\",\"control\":\"external\"} to receive {\"type\":\"observation\",\"id\":N,\"observation\":{...}} on each of its turns. The observation contains only that seat's notes, public board and wall state, rules, goal, move history, both public standings, and the complete legalMoves array. Reply with {\"type\":\"action\",\"id\":N,\"move\":\"<exact legal move>\"}; the game checks turn, id, and legality before applying it. Invalid replies count toward illegalReplies; a missing reply falls back to tactician. Existing prompt and scripted players send {\"type\":\"prompt\",\"prompt\":\"...\",\"scripted\":false|\"tactician\"|\"hustler\"} and continue to receive redacted state frames. Every player receives final scores and exits. PLAYER_PROMPT supplies prompt strategy. PLAYER_SCRIPTED=tactician|hustler selects a baseline."
+        "value": "gauntlet.player.v2 uses JSON text frames over COWORLD_PLAYER_WS_URL (?slot=N&token=T). On connect the game sends welcome with protocol, slot, alias, game, size, and caps. A player registers with {\"type\":\"register\",\"control\":\"external\"} to receive {\"type\":\"observation\",\"id\":N,\"observation\":{...}} on each of its turns. The observation contains only that seat's notes, public board and wall state, rules, goal, move history, both public standings, and the complete legalMoves array. Reply with {\"type\":\"action\",\"id\":N,\"move\":\"<exact legal move>\"}; the game checks turn, id, and legality before applying it. Invalid replies count toward illegalReplies; a missing reply falls back to tactician. Existing prompt and scripted players send {\"type\":\"prompt\",\"prompt\":\"...\",\"scripted\":false|\"tactician\"|\"hustler\"} and continue to receive redacted state frames. Every player receives final scores and exits. PLAYER_PROMPT supplies prompt strategy. PLAYER_SCRIPTED=tactician|hustler selects a baseline. Observation frames also carry messages and prompt_template outside the unchanged observation: selected system/user messages, bank, requested and resolved variant, seed, and SHA-256 hashes. Operator strategy stays private."
       },
       "global": {
         "type": "text",
-        "value": "Global spectators connect a websocket to /global and receive the whole snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"board-gauntlet\",\"board_game\":\"quoridor\",\"rotated\":true,\"size\":9,\"walls\":10,\"board\":[\"empty\",\"seat0\",...] (occupants, row-major from rank 1),\"hWalls\":[bool...],\"vWalls\":[bool...],\"pawns\":[36,76],\"wallsLeft\":[7,9],\"seats\":[{name, policy, standing, captures, wallsUsed, wallsLeft, score, say, notes, scripted, fellBack, readout} x2],\"mover\":0,\"ply\":14,\"maxPlies\":80,\"plies\":14,\"legalCount\":37,\"lastMove\":{\"seat\":0,\"move\":\"e3h\",\"mkind\":\"wall\",\"capture\":\"\"},\"eval\":0.18,\"winner\":-1,\"winPath\":[],\"phase\":\"moving\"|\"done\",\"gameDone\":false,\"reason\":\"\",\"ending\":\"\",\"policyNames\":[...],\"events\":[{kind:start|move|win|end,...}],\"started\":true,\"connected\":[bool,bool]}. `readout` is the one-line per-seat tension string the scorebug draws (TO CONNECT 3, PATH 6 / WALLS 7, PIECES 9 / ROW 4, THREATS 2). Moves and cells are ALGEBRAIC strings ('d', 'c4', 'b2-c3', 'e3h'), never indices. Three browser pages render it: /client/global is the spectator stage, /client/player is the seat's view, and /client/replay plays a recorded episode; hosted replays are served by the STATIC wasm bundle (index.html?replay=<url>), never by a pod."
+        "value": "Global spectators connect a websocket to /global and receive the whole snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"board-gauntlet\",\"board_game\":\"quoridor\",\"rotated\":true,\"size\":9,\"walls\":10,\"board\":[\"empty\",\"seat0\",...] (occupants, row-major from rank 1),\"hWalls\":[bool...],\"vWalls\":[bool...],\"pawns\":[36,76],\"wallsLeft\":[7,9],\"seats\":[{name, policy, standing, captures, wallsUsed, wallsLeft, score, say, scripted, fellBack, readout} x2],\"mover\":0,\"ply\":14,\"maxPlies\":80,\"plies\":14,\"legalCount\":37,\"lastMove\":{\"seat\":0,\"move\":\"e3h\",\"mkind\":\"wall\",\"capture\":\"\"},\"eval\":0.18,\"winner\":-1,\"winPath\":[],\"phase\":\"moving\"|\"done\",\"gameDone\":false,\"reason\":\"\",\"ending\":\"\",\"policyNames\":[...],\"events\":[{kind:start|move|win|end,...}],\"started\":true,\"connected\":[bool,bool]}. `readout` is the one-line per-seat tension string the scorebug draws (TO CONNECT 3, PATH 6 / WALLS 7, PIECES 9 / ROW 4, THREATS 2). Moves and cells are ALGEBRAIC strings ('d', 'c4', 'b2-c3', 'e3h'), never indices. Three browser pages render it: /client/global is the spectator stage, /client/player is the seat's view, and /client/replay plays a recorded episode; hosted replays are served by the STATIC wasm bundle (index.html?replay=<url>), never by a pod."
       }
     },
     "docs": {

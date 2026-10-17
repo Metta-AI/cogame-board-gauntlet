@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:board-gauntlet-train-bridge tools/train_bridge.nim
 
 import std/[json, os, strutils]
-import gauntlet/[sim, llm]
+import gauntlet/[sim, llm, prompts]
 
 const OperatorPrompt = "Play to win. Copy one legal move exactly."
 const ActionSlots = 256
@@ -14,7 +14,7 @@ proc seedOf(value: string): int =
     hash = (hash xor uint32(ord(ch))) * 16777619'u32
   int(hash and 0x7fffffff'u32)
 
-proc decision(game: Sim, id: int): JsonNode =
+proc decision(game: Sim, id: int, selection: PromptSelection, languageMode: bool): JsonNode =
   var board = newJArray()
   for occupant in game.board:
     board.add(%($occupant))
@@ -25,7 +25,7 @@ proc decision(game: Sim, id: int): JsonNode =
   for wall in game.vWalls:
     vWalls.add(%wall)
   let legal = game.legalMoves()
-  %*{
+  result = %*{
     "kind": "decision", "game": "board-gauntlet", "decision_id": id,
     "seat": game.mover, "engine_seat": game.mover, "turn": game.plies,
     "semantic_view": {
@@ -38,7 +38,7 @@ proc decision(game: Sim, id: int): JsonNode =
     },
     "inbox": [],
     "messages": [
-      {"role": "system", "content": game.systemPrompt(game.mover)},
+      {"role": "system", "content": game.systemPrompt(game.mover, selection)},
       {"role": "user", "content": game.userPrompt(game.mover, OperatorPrompt)}
     ],
     "speech_messages": [],
@@ -46,6 +46,13 @@ proc decision(game: Sim, id: int): JsonNode =
       "properties": {"move": {"type": "string", "enum": legal}}},
     "typed_question": newJNull()
   }
+
+  if languageMode:
+    result["inference_mode"] = %"text_action"
+    result["action_schema"]["properties"]["say"] = %*{"type": "string", "maxLength": MaxSayLen}
+    result["action_schema"]["properties"]["notes"] = %*{"type": "string", "maxLength": MaxNotesLen}
+    result["semantic_view"]["prompt_template"] = selection.promptMetadata(
+      result["messages"][0]["content"].getStr(), result["messages"][1]["content"].getStr())
 
 proc moveFeatures(game: Sim, move: string): array[6, int] =
   ## A legal move's geometry accompanies its changing catalog index.
@@ -98,9 +105,11 @@ proc encoding(game: Sim, id: int): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: board-gauntlet-train-bridge MANIFEST [variant]", 1)
-  let variant = if args.len == 2: args[1] else: "gauntlet"
+  if args.len notin 1 .. 3:
+    quit("usage: board-gauntlet-train-bridge MANIFEST [variant [--language]]", 1)
+  let variant = if args.len >= 2: args[1] else: "gauntlet"
+  let languageMode = args.len == 3
+  if languageMode: doAssert args[2] == "--language"
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
@@ -109,12 +118,18 @@ when isMainModule:
   doAssert not variantConfig.isNil, "unknown variant: " & variant
   var game: Sim
   var id = 0
+  var selection: PromptSelection
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
     var response: JsonNode
     case request["kind"].getStr()
     of "reset":
       doAssert request["players"].getInt() == 2
+      selection = promptSelection(request)
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        raise newException(ValueError, "held-out prompt variants are evaluation-only")
+      if not languageMode and selection.variant != pvCanonical:
+        raise newException(ValueError, "prompt variants require --language")
       var config = defaultGameConfig()
       let runtimeConfig = copy(variantConfig)
       runtimeConfig["tokens"] = %*["t0", "t1"]
@@ -124,27 +139,36 @@ when isMainModule:
       config = sampleEpisode(config)
       game = initSim(config)
       id = 0
-      response = game.decision(id)
+      response = game.decision(id, selection, languageMode)
     of "encode":
+      doAssert not languageMode
       doAssert not game.done
       response = game.encoding(id)
     of "teacher":
       doAssert not game.done
       let baseline = if game.mover == game.config.seed mod 2:
         blTactician else: blHustler
-      response = %*{"response": $(%*{"move": scriptedMove(game, baseline)})}
+      var action = %*{"move": scriptedMove(game, baseline)}
+      if languageMode:
+        action["say"] = %""
+        action["notes"] = %""
+      response = %*{"response": $action}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
-      let action = parseJson(request["response"].getStr())
-      let move = action["move"].getStr()
-      game.applyMove(move, "", "", true, false)
+      var action = parseJson(request["response"].getStr())
+      if languageMode:
+        let parsed = game.parseReply(action)
+        game.applyMove(parsed.move, parsed.say, parsed.notes, true, false)
+        action = %*{"move": parsed.move, "say": parsed.say, "notes": parsed.notes}
+      else:
+        game.applyMove(action["move"].getStr(), "", "", true, false)
       inc id
       var observation: JsonNode
       if game.done:
         observation = %*{"kind": "terminal", "scores": {
           "0": game.score(0), "1": game.score(1)}}
       else:
-        observation = game.decision(id)
+        observation = game.decision(id, selection, languageMode)
       response = %*{"kind": "accepted", "action": action,
         "observation": observation}
     else:
