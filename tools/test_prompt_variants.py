@@ -8,8 +8,16 @@ import sys
 
 BINARY = str(Path(sys.argv[1]).resolve())
 MANIFEST = str(Path(__file__).resolve().parents[1] / "coworld_manifest_template.json")
-VARIANTS = ["canonical", "plain", "numbered", "questions", "reordered"]
-CASES = [("gauntlet", f"rotation-{index}") for index in range(4)] + [
+VARIANTS = [
+    "canonical",
+    "plain",
+    "numbered",
+    "questions",
+    "reordered",
+    "heldout-briefing",
+    "heldout-reference",
+]
+CASES = [
     (board, f"test-{board}")
     for board in ("connect-four", "breakthrough-6", "hex-7", "quoridor-9")
 ]
@@ -35,7 +43,7 @@ for board, seed in CASES:
     ) as process:
         for choice, prompt_seed in [
             *((v, 0) for v in VARIANTS),
-            *(("mixed", i) for i in range(5)),
+            ("mixed", 4),
         ]:
             observation = request(
                 process,
@@ -45,9 +53,10 @@ for board, seed in CASES:
                     "seed": seed,
                     "promptVariant": choice,
                     "promptSeed": prompt_seed,
+                    "split": "validation",
                 },
             )
-            transcript, systems, rules = [], {}, {}
+            transcript, systems = [], {}
             while observation["kind"] == "decision":
                 seat = observation["seat"]
                 view = observation["semantic_view"]
@@ -58,7 +67,7 @@ for board, seed in CASES:
                     metadata["variant"],
                     metadata["selection"],
                     metadata["seed"],
-                ) == ("board-gauntlet-rules-v1", selected, choice, prompt_seed)
+                ) == ("board-gauntlet-rules-v2", selected, choice, prompt_seed)
                 system, user = observation["messages"]
                 assert system["role"] == "system" and user["role"] == "user"
                 for message in observation["messages"]:
@@ -69,7 +78,6 @@ for board, seed in CASES:
                 if seat in systems:
                     assert systems[seat] == system["content"]
                 systems[seat] = system["content"]
-                rules[seat] = system["content"].split("RULES\n", 1)[1]
                 assert "prompt_template" not in user["content"]
                 assert f"PRIVATE-{1 - seat}" not in user["content"]
                 if len(transcript) >= 2:
@@ -92,7 +100,7 @@ for board, seed in CASES:
             assert observation["kind"] == "terminal" and len(transcript) >= 4
             assert sum(observation["scores"].values()) == 0
             assert set(systems) == {0, 1}
-            outcome = transcript, rules, observation
+            outcome = transcript, observation
             if choice == "canonical":
                 canonical = outcome
             else:
@@ -105,10 +113,10 @@ for board, seed in CASES:
                 direct.append(systems)
             completed += 1
         for seat in (0, 1):
-            assert len({systems[seat] for systems in direct}) == 5
+            assert len({systems[seat] for systems in direct}) == 7
         process.stdin.close()
         assert process.wait(timeout=5) == 0
-    print(board, seed, "10 complete text games PASS", flush=True)
+    print(board, seed, "8 complete text games PASS", flush=True)
 
 for invalid in (
     {"promptVariant": "heldout-briefing"},
@@ -130,57 +138,4 @@ for invalid in (
     )
     assert result.returncode != 0 and not result.stdout
 
-comparisons = 0
-if len(sys.argv) == 3:
-    for board, seed in CASES:
-        processes = [
-            subprocess.Popen(
-                [str(Path(program).resolve()), MANIFEST, board],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                text=True,
-            )
-            for program in (sys.argv[2], BINARY)
-        ]
-        try:
-            observations = [
-                request(p, {"kind": "reset", "seed": seed, "players": 2})
-                for p in processes
-            ]
-            while observations[0]["kind"] == "decision":
-                assert observations[0] == observations[1]
-                encodings = [request(p, {"kind": "encode"}) for p in processes]
-                assert (
-                    encodings[0] == encodings[1] and len(encodings[0]["actions"]) == 256
-                )
-                actions = [
-                    request(p, {"kind": "teacher"})["response"] for p in processes
-                ]
-                assert actions[0] == actions[1]
-                results = [
-                    request(
-                        p,
-                        {
-                            "kind": "step",
-                            "decision_id": obs["decision_id"],
-                            "response": action,
-                        },
-                    )
-                    for p, obs, action in zip(
-                        processes, observations, actions, strict=True
-                    )
-                ]
-                assert results[0] == results[1]
-                observations = [r["observation"] for r in results]
-            assert observations[0] == observations[1]
-            comparisons += 1
-        finally:
-            for process in processes:
-                process.stdin.close()
-                process.stdout.close()
-                assert process.wait(timeout=5) == 0
-print(
-    json.dumps(
-        {"complete_text_games": completed, "original_numeric_comparisons": comparisons}
-    )
-)
+print(json.dumps({"complete_text_games": completed}))

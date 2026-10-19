@@ -14,7 +14,8 @@ config.players = @[PlayerConfig(name: "a"), PlayerConfig(name: "b")]
 config.tokens = @["a", "b"]
 var game = initSim(config)
 let before = game
-let decision = newLlmClient(config).decide(game, "Exact private operator prompt", "", PromptSelection())
+let selection = PromptSelection(variant: pvMixed, seed: 4)
+let decision = newLlmClient(config).decide(game, "Exact private operator prompt", "", selection)
 doAssert decision.nativeAttempts.len == 2
 doAssert not decision.nativeAttempts[0].accepted
 if paramStr(2) == "retry":
@@ -34,6 +35,6 @@ for attempt in decision.nativeAttempts:
 game.applyMove(decision.move, decision.say, decision.notes, decision.scripted, decision.fellBack)
 let trajectory = newDecisionTrajectory("probe", "probe", "board-gauntlet", "fixture", "fixture-source")
 trajectory.recordAppliedDecision(before, decision, decision,
-  "Exact private operator prompt", "native-fixture", game.done, PromptSelection())
+  "Exact private operator prompt", "native-fixture", game.done, selection)
 trajectory.finish(esTruncated, game.resultsJson(), %*{})
 echo trajectory.eventsJsonl()

@@ -16,7 +16,7 @@ type
     variant*: PromptVariant
     seed*: int
 
-const PromptBankVersion* = "board-gauntlet-rules-v1"
+const PromptBankVersion* = "board-gauntlet-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:
@@ -53,5 +53,23 @@ const Introductions = [
   "Board Gauntlet reference\nIdentity: cog $1. Side: $3. Game: $2. Opponent: one other cog.\nGame class: two-player, zero-sum, perfect-information board game.\nInformation each ply: the entire position, entire move history, and entire legal-move set.\nVisibility: all board information is visible to both players; your opponent's thinking is not visible to you.\n\n"
 ]
 
-proc introduction*(selection: PromptSelection, name, game, colour: string): string =
-  Introductions[ord(selection.selectedVariant)] % [name, game, colour]
+const TurnRules = [
+  "- Seats alternate strictly, one move each; there is no pass and no double move.\n- If $1 plies are played with no terminal position, the game is adjudicated on the position heuristic you are shown each ply; the wall clock can stop it the same way.\n\nSCORING: +1 for a win, 0 for a draw, -1 for a loss. Nothing else is scored.\n\n",
+  "Take exactly one move on your turn, then your opponent moves. You cannot pass or move twice. If play reaches $1 plies without a terminal position, the displayed position heuristic decides the result. The wall-clock limit can end play with the same adjudication. Only the result earns points: a win is +1, a draw 0, and a loss -1.\n\n",
+  "Turn and result rules:\n1. Alternate seats, exactly one move per turn; no passes or double moves.\n2. At $1 plies without a terminal position, adjudicate using the position heuristic shown each ply. The wall-clock limit can trigger the same adjudication.\n3. Score only the result: win +1, draw 0, loss -1.\n\n",
+  "How do turns work? Seats strictly alternate one move each, with no passing or double moves. What if no terminal position is reached? After $1 plies, use the position heuristic shown each ply to adjudicate; the wall clock can stop play the same way. What counts toward score? Only winning (+1), drawing (0), or losing (-1).\n\n",
+  "Only the result is scored: +1 for winning, 0 for drawing, -1 for losing. If the game is still nonterminal after $1 plies, adjudicate on the position heuristic displayed each ply. A wall-clock stop uses the same adjudication. Play alternates strictly between seats, one move per turn; passing and double moves are forbidden.\n\n",
+  "Play briefing: make one move, then yield to the other seat. Neither player may pass or take a double move. Reaching $1 plies without a terminal position invokes adjudication by the position heuristic shown every ply; the wall clock may end the game on that basis too. Your sole score is +1 for a win, 0 for a draw, or -1 for a loss.\n\n",
+  "Turn reference: strict alternation; one move per seat; no pass; no double move. Adjudication: after $1 plies without a terminal position, use the position heuristic shown each ply; a wall-clock stop can do the same. Score reference: win +1, draw 0, loss -1; no other scoring.\n\n"
+]
+
+proc systemPrompt*(selection: PromptSelection, name, game, colour, rules: string,
+    maxPlies: int): string =
+  let index = ord(selection.selectedVariant)
+  result = Introductions[index] % [name, game, colour]
+  result.add("RULES\n" & rules)
+  result.add(TurnRules[index] % [$maxPlies])
+  result.add("OUTPUT FORMAT: reply with ONLY one JSON object, nothing " &
+    "else - no analysis, no explanation, no markdown fences, no text " &
+    "before or after the object. Your reply must begin with the " &
+    "character { and end with }.")

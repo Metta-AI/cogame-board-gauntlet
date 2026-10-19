@@ -73,10 +73,12 @@ The numeric bridge is a separate research interface, not this hosted path.
 
 Build the bridge and use `board-gauntlet-train-bridge MANIFEST VARIANT --language`
 for text collection. Reset accepts `promptVariant` and `promptSeed`; training
-permits five wordings, including canonical, and rejects held-out selections.
+permits five wordings, including canonical. Held-out selections require an explicit
+`split: validation` on the reset and are rejected by training exports.
 The numeric interface preserves its canonical messages and action catalog.
 
 The source exporter accepts `OUTPUT EPISODES FIRST_SEED PROMPT_VARIANT PROMPT_SEED`.
+Mixed exports advance the prompt seed per episode and record each selection.
 Collect separate private directories with identical scenario seeds for each
 wording. Episode identities include the wording; scenario-family identities
 and train/validation assignment depend only on the scenario seed. Keep the
@@ -99,24 +101,8 @@ Run the retained full-game wording checks after building the bridge:
 python3 tools/test_prompt_variants.py /tmp/board-gauntlet-train-bridge
 ```
 
-An optional second argument names the original bridge binary for numeric
-comparisons. The panel covers all four rotated games and all four explicit
-board variants, five direct wordings, five mixed selections, exact message
-hashes, private notes, and unchanged legal moves, actions, and outcomes.
-
-The hosted panels use the shipped server and all four ordinary board variants:
-
-```sh
-python3 -m pip install websockets==16.1.1
-python3 tools/test_prompt_socket_games.py GAME_BINARY OUTPUT_DIRECTORY SOURCE_REVISION
-python3 tools/test_prompt_native_games.py GAME_BINARY PLAYER_BINARY OUTPUT_DIRECTORY SOURCE_REVISION
-```
-
-The socket panel runs 48 complete games and compares private prompts, hashes,
-observations, actions, public replays, and results. It stops its server after
-final artifacts are written. The native panel runs 12 complete games through
-both real players and checks natural shutdown, private operator guidance,
-two actual failed requests per decision, retry hashes, and consumed fallbacks.
-Its closed local endpoint uses a one-second request-spacing floor; ordinary
-board sizes, ply caps, wall-clock budgets, and scoring remain unchanged.
-Neither panel measures model quality or replaces published runtime validation.
+The 32 complete games cover all four board variants, seven direct wordings,
+and one mixed selection. They check exact message hashes, private notes, legal
+moves, actions and outcomes. The existing native retry/fallback fixture now uses
+mixed wording, including exact request-to-attempt checks. The duplicate socket
+and native wording panels have been removed.

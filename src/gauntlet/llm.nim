@@ -469,21 +469,8 @@ proc rulesText*(game: Game, size: int): string =
   of gRotate: ""
 
 proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
-  result.add(selection.introduction(sim.names[seat],
-    ($sim.config.game).toUpperAscii(), colourOf(seat)))
-  result.add("RULES\n" & rulesText(sim.config.game, sim.config.size))
-  result.add("- Seats alternate strictly, one move each; there is no " &
-    "pass and no double move.\n")
-  result.add("- If " & $sim.config.maxPlies & " plies are played with no " &
-    "terminal position, the game is adjudicated on the position " &
-    "heuristic you are shown each ply; the wall clock can stop it the " &
-    "same way.\n\n")
-  result.add("SCORING: +1 for a win, 0 for a draw, -1 for a loss. " &
-    "Nothing else is scored.\n\n")
-  result.add("OUTPUT FORMAT: reply with ONLY one JSON object, nothing " &
-    "else - no analysis, no explanation, no markdown fences, no text " &
-    "before or after the object. Your reply must begin with the " &
-    "character { and end with }.")
+  selection.systemPrompt(sim.names[seat], ($sim.config.game).toUpperAscii(),
+    colourOf(seat), rulesText(sim.config.game, sim.config.size), sim.config.maxPlies)
 
 proc userPrompt*(sim: Sim, seat: int, operatorPrompt: string): string =
   result.add("Ply " & $(sim.plies + 1) & " of " & $sim.config.maxPlies &

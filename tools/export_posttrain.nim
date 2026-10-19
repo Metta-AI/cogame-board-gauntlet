@@ -12,9 +12,9 @@ when isMainModule:
   let output = args[0]
   let episodes = parseInt(args[1])
   let firstSeed = if args.len >= 3: parseInt(args[2]) else: 0
-  let selection = promptSelection(if args.len == 5:
+  let initialSelection = promptSelection(if args.len == 5:
     %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
-  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+  if initialSelection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
     raise newException(ValueError, "held-out prompt variants are evaluation-only")
   doAssert episodes >= 20 and firstSeed >= 0
   doAssert not dirExists(output) and not fileExists(output)
@@ -25,6 +25,9 @@ when isMainModule:
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   var runs = newJArray()
   for seed in firstSeed ..< firstSeed + episodes:
+    var selection = initialSelection
+    if selection.variant == pvMixed:
+      selection.seed += seed - firstSeed
     var config = defaultGameConfig()
     config.seed = seed
     let tacticianSeat = seed mod 2
@@ -69,12 +72,14 @@ when isMainModule:
     let split = if seed mod 5 == 0: "validation" else: "train"
     trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
     runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "game": $sim.config.game,
+      "prompt_selection": {"bank": PromptBankVersion, "variant": $selection.selectedVariant,
+        "selection": $selection.variant, "seed": selection.seed},
       "teacher_seat": tacticianSeat, "opening_plies": openingPlies,
       "decisions": sim.plies, "selected_decision_ids": selectedDecisionIds, "results": results})
   writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
     "format": "coworld-private-complete-episodes-v1", "game": "board-gauntlet",
     "source_revision": sourceRevision, "teacher_policy": "scripted-tactician",
     "opponent_policy": "scripted-hustler", "operator_prompt": OperatorPrompt,
-    "prompt_selection": {"bank": PromptBankVersion, "variant": $selection.selectedVariant,
-      "selection": $selection.variant, "seed": selection.seed}, "runs": runs}) & "\n")
+    "prompt_selection": {"bank": PromptBankVersion, "variant": $initialSelection.selectedVariant,
+      "selection": $initialSelection.variant, "seed": initialSelection.seed}, "runs": runs}) & "\n")
   echo "complete episodes=", episodes

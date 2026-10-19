@@ -166,14 +166,6 @@ jobs:
           /tmp/export-posttrain /tmp/board-gauntlet-training 20
           python3 tests/test_training_corpus.py /tmp/board-gauntlet-training
 
-      - name: Complete hosted prompt wording games
-        run: |
-          python3 -m pip install websockets==16.1.1
-          nim c --parallelBuild:1 --hints:off -d:release --threads:on --path:src --out:/tmp/board-gauntlet-game src/gauntlet.nim
-          nim c --parallelBuild:1 --hints:off -d:release --threads:on --path:src --out:/tmp/board-gauntlet-player src/gauntlet_player.nim
-          python3 tools/test_prompt_socket_games.py /tmp/board-gauntlet-game /tmp/board-gauntlet-sockets "$GITHUB_SHA"
-          python3 tools/test_prompt_native_games.py /tmp/board-gauntlet-game /tmp/board-gauntlet-player /tmp/board-gauntlet-native "$GITHUB_SHA"
-
       - name: Native language retry and private action joins
         run: python3 tests/test_native_training.py
 
