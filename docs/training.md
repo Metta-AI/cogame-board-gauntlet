@@ -36,7 +36,7 @@ not implicitly teacher labels.
 From the shared Metta checkout, validate and combine the episode files:
 
 ```sh
-uv run --package metta-posttraining python - <<'PYTHON'
+uv run --package coworld python - <<'PYTHON'
 import os
 from pathlib import Path
 from coworld.decision_trajectory import CompleteEpisode
@@ -82,7 +82,9 @@ Mixed exports advance the prompt seed separately within each source split and re
 This prevents every-fifth-seed validation from removing a wording from the source training directory.
 The shared importer assigns its own whole-family splits; check wording coverage in its final training rows too.
 Collect separate private directories with identical scenario seeds for each
-wording. Episode identities include the wording; scenario-family identities
+wording. Episode identities include requested selection, resolved wording, and prompt seed.
+Canonical and mixed exports remain distinct even when they resolve to the same wording.
+Scenario-family identities
 and train/validation assignment depend only on the scenario seed. Keep the
 original teacher, opponent, and random-opening labels and selected decision IDs.
 Prompt diversity does not turn opponent moves or random openings into targets.

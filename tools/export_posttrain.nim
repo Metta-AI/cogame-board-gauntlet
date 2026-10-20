@@ -41,7 +41,8 @@ when isMainModule:
     let openingPlies = seed mod 6
     var rng = initRand(int64(seed) * 1009 + 7)
     let familyId = "board-gauntlet-" & $seed
-    let episodeId = familyId & "-" & $selection.selectedVariant & "-" & $selection.seed
+    let episodeId = familyId & "-" & $selection.variant & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
     let trajectory = newDecisionTrajectory(episodeId, familyId,
       "board-gauntlet", "source-" & sourceRevision, sourceRevision)
     var selectedDecisionIds: seq[string]
