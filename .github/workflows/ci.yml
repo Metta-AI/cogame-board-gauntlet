@@ -155,6 +155,11 @@ jobs:
           done
           exit "${fail}"
 
+      - name: Complete prompt wording games
+        run: |
+          nim c --parallelBuild:1 --hints:off -d:release --path:src --out:/tmp/board-gauntlet-train-bridge tools/train_bridge.nim
+          python3 tools/test_prompt_variants.py /tmp/board-gauntlet-train-bridge
+
       - name: Complete private training corpus
         run: |
           nim c --hints:off -d:release --path:src --out:/tmp/export-posttrain tools/export_posttrain.nim

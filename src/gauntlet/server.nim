@@ -26,6 +26,7 @@ import
   bitworld/decision_trajectory,
   curly,
   mummy,
+  prompts,
   mummy/routers,
   llm,
   training,
@@ -46,6 +47,7 @@ const
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: seq[string]
     baselines: seq[string]      ## "" = LLM seat, else the baseline's name
@@ -335,7 +337,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.playerSockets[mover].send($ %*{
             "type": "observation",
             "id": state.decisionId,
-            "observation": state.sim.playerObservation(mover)
+            "observation": state.sim.playerObservation(mover),
+            "messages": [
+              {"role": "system", "content": state.sim.systemPrompt(mover, state.selection)},
+              {"role": "user", "content": state.sim.userPrompt(mover, seatPrompt)}],
+            "prompt_template": state.selection.promptMetadata(
+              state.sim.systemPrompt(mover, state.selection), state.sim.userPrompt(mover, seatPrompt))
           })
         let replyDeadline = epochTime() + config.llmTimeoutSeconds.float
         var move = ""
@@ -354,7 +361,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(applied.move, "", "", false, applied.fellBack)
           if state.trajectory.isSome:
             state.trajectory.get().recordAppliedDecision(simCopy, proposed,
-              applied, seatPrompt, "external-gauntlet", state.sim.done)
+              applied, seatPrompt, "external-gauntlet", state.sim.done, state.selection)
           echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
             " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
             (epochTime() - gameStart).int, "s"
@@ -375,7 +382,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
-      let decision = client.decide(simCopy, seatPrompt, seatBaseline)
+      let decision = client.decide(simCopy, seatPrompt, seatBaseline, state.selection)
       var applied = decision
 
       withLock stateLock:
@@ -390,7 +397,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(applied.move, "", "", false, true)
         if state.trajectory.isSome:
           state.trajectory.get().recordAppliedDecision(simCopy, decision,
-            applied, seatPrompt, "scripted-" & seatBaseline, state.sim.done)
+            applied, seatPrompt, "scripted-" & seatBaseline, state.sim.done, state.selection)
         echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
           " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
           (epochTime() - gameStart).int, "s"
@@ -637,6 +644,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(GauntletError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(if runtimeConfig.config.len > 0:
+    parseJson(runtimeConfig.config) else: newJObject())
   state.sim = initSim(config)
   if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
     state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),

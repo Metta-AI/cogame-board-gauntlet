@@ -20,7 +20,7 @@ import
   bitworld/runtime,
   bitworld/decision_trajectory,
   curly,
-  sim
+  sim, prompts
 from games/connect_four import nil
 from games/breakthrough import nil
 from games/hex import nil
@@ -468,29 +468,9 @@ proc rulesText*(game: Game, size: int): string =
     "- You win the moment your pawn reaches your goal rank.\n"
   of gRotate: ""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  let me = sim.names[seat]
-  result.add("You are " & me & ", a cog playing " &
-    ($sim.config.game).toUpperAscii() & " against one other cog on the " &
-    "Board Gauntlet. You play " & colourOf(seat) & ".\n\n")
-  result.add("This is a PERFECT-INFORMATION, zero-sum, two-player board " &
-    "game. You are shown the entire position, the entire move history and " &
-    "the entire legal-move set every ply. Nothing about the board is " &
-    "hidden from you and nothing about it is hidden from your opponent; " &
-    "the only thing you cannot see is what they are thinking.\n\n")
-  result.add("RULES\n" & rulesText(sim.config.game, sim.config.size))
-  result.add("- Seats alternate strictly, one move each; there is no " &
-    "pass and no double move.\n")
-  result.add("- If " & $sim.config.maxPlies & " plies are played with no " &
-    "terminal position, the game is adjudicated on the position " &
-    "heuristic you are shown each ply; the wall clock can stop it the " &
-    "same way.\n\n")
-  result.add("SCORING: +1 for a win, 0 for a draw, -1 for a loss. " &
-    "Nothing else is scored.\n\n")
-  result.add("OUTPUT FORMAT: reply with ONLY one JSON object, nothing " &
-    "else - no analysis, no explanation, no markdown fences, no text " &
-    "before or after the object. Your reply must begin with the " &
-    "character { and end with }.")
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
+  selection.systemPrompt(sim.names[seat], ($sim.config.game).toUpperAscii(),
+    colourOf(seat), rulesText(sim.config.game, sim.config.size), sim.config.maxPlies)
 
 proc userPrompt*(sim: Sim, seat: int, operatorPrompt: string): string =
   result.add("Ply " & $(sim.plies + 1) & " of " & $sim.config.maxPlies &
@@ -648,7 +628,7 @@ proc parseReply*(sim: Sim, payload: JsonNode): Decision =
       $sim.config.game & " move")
 
 proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
-    baseline: string): Decision =
+    baseline: string, selection: PromptSelection): Decision =
   ## One decision for the seat to move. NEVER raises: every failure falls
   ## back to `tactician`, so the episode always advances.
   if baseline.len > 0:
@@ -657,7 +637,7 @@ proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
   if client.isNil or client.disabled:
     return Decision(move: scriptedMove(sim, blTactician), fellBack: true)
   let seat = sim.mover
-  let system = systemPrompt(sim, seat)
+  let system = systemPrompt(sim, seat, selection)
   var illegal = false
   for attempt in 0 .. 1:
     var user = sim.userPrompt(seat, operatorPrompt)

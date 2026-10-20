@@ -1,17 +1,21 @@
 ## Export authoritative private complete episodes, with full control provenance.
 import std/[json, os, osproc, random, strutils]
 import bitworld/decision_trajectory
-import gauntlet/[sim, llm, training]
+import gauntlet/[sim, llm, training, prompts]
 
 const OperatorPrompt = "Play to win. Copy one legal move exactly."
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 2 .. 3:
-    quit("usage: export_posttrain OUTPUT EPISODES [FIRST_SEED]", 1)
+  if args.len notin [2, 3, 5]:
+    quit("usage: export_posttrain OUTPUT EPISODES [FIRST_SEED [PROMPT_VARIANT PROMPT_SEED]]", 1)
   let output = args[0]
   let episodes = parseInt(args[1])
-  let firstSeed = if args.len == 3: parseInt(args[2]) else: 0
+  let firstSeed = if args.len >= 3: parseInt(args[2]) else: 0
+  let initialSelection = promptSelection(if args.len == 5:
+    %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
+  if initialSelection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+    raise newException(ValueError, "held-out prompt variants are evaluation-only")
   doAssert episodes >= 20 and firstSeed >= 0
   doAssert not dirExists(output) and not fileExists(output)
   doAssert execProcess("git status --porcelain").strip().len == 0,
@@ -20,7 +24,13 @@ when isMainModule:
   setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   var runs = newJArray()
+  var wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + episodes:
+    var selection = initialSelection
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+      inc wordingCounts[partition]
     var config = defaultGameConfig()
     config.seed = seed
     let tacticianSeat = seed mod 2
@@ -30,8 +40,10 @@ when isMainModule:
     var sim = initSim(config)
     let openingPlies = seed mod 6
     var rng = initRand(int64(seed) * 1009 + 7)
-    let episodeId = "board-gauntlet-" & $seed
-    let trajectory = newDecisionTrajectory(episodeId, episodeId,
+    let familyId = "board-gauntlet-" & $seed
+    let episodeId = familyId & "-" & $selection.variant & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
+    let trajectory = newDecisionTrajectory(episodeId, familyId,
       "board-gauntlet", "source-" & sourceRevision, sourceRevision)
     var selectedDecisionIds: seq[string]
     while not sim.done:
@@ -54,7 +66,7 @@ when isMainModule:
       doAssert parsed.move == decision.move
       sim.applyMove(parsed.move, parsed.say, parsed.notes, decision.scripted, false)
       trajectory.recordAppliedDecision(before, decision, decision,
-        OperatorPrompt, policy, sim.done)
+        OperatorPrompt, policy, sim.done, selection)
     let results = sim.resultsJson()
     doAssert results["reason"].getStr() == "complete"
     var participants = newJObject()
@@ -64,11 +76,14 @@ when isMainModule:
     let split = if seed mod 5 == 0: "validation" else: "train"
     trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
     runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "game": $sim.config.game,
+      "prompt_selection": {"bank": PromptBankVersion, "variant": $selection.selectedVariant,
+        "selection": $selection.variant, "seed": selection.seed},
       "teacher_seat": tacticianSeat, "opening_plies": openingPlies,
       "decisions": sim.plies, "selected_decision_ids": selectedDecisionIds, "results": results})
   writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
     "format": "coworld-private-complete-episodes-v1", "game": "board-gauntlet",
     "source_revision": sourceRevision, "teacher_policy": "scripted-tactician",
     "opponent_policy": "scripted-hustler", "operator_prompt": OperatorPrompt,
-    "runs": runs}) & "\n")
+    "prompt_selection": {"bank": PromptBankVersion, "variant": $initialSelection.selectedVariant,
+      "selection": $initialSelection.variant, "seed": initialSelection.seed}, "runs": runs}) & "\n")
   echo "complete episodes=", episodes

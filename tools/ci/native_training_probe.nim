@@ -1,7 +1,7 @@
 ## Actual native client, parser normalization, and authoritative apply probe.
 import std/[json, options, os]
 import bitworld/decision_trajectory
-import gauntlet/[llm, sim, training]
+import gauntlet/[prompts, llm, sim, training]
 
 putEnv("COWORLD_LLM_ENDPOINT", paramStr(1))
 putEnv("COWORLD_LLM_MODEL", "checkpoint/native-fixture")
@@ -14,7 +14,8 @@ config.players = @[PlayerConfig(name: "a"), PlayerConfig(name: "b")]
 config.tokens = @["a", "b"]
 var game = initSim(config)
 let before = game
-let decision = newLlmClient(config).decide(game, "Exact private operator prompt", "")
+let selection = PromptSelection(variant: pvMixed, seed: 4)
+let decision = newLlmClient(config).decide(game, "Exact private operator prompt", "", selection)
 doAssert decision.nativeAttempts.len == 2
 doAssert not decision.nativeAttempts[0].accepted
 if paramStr(2) == "retry":
@@ -34,6 +35,6 @@ for attempt in decision.nativeAttempts:
 game.applyMove(decision.move, decision.say, decision.notes, decision.scripted, decision.fellBack)
 let trajectory = newDecisionTrajectory("probe", "probe", "board-gauntlet", "fixture", "fixture-source")
 trajectory.recordAppliedDecision(before, decision, decision,
-  "Exact private operator prompt", "native-fixture", game.done)
+  "Exact private operator prompt", "native-fixture", game.done, selection)
 trajectory.finish(esTruncated, game.resultsJson(), %*{})
 echo trajectory.eventsJsonl()

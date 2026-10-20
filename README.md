@@ -161,3 +161,19 @@ originates in `coworld-ctf`, the font is Rajdhani — see
 `data/FONT_LICENSE.txt`).
 
 MIT licensed.
+
+## Rules wording
+
+Set `promptVariant` to `canonical`, `plain`, `numbered`, `questions`, or
+`reordered`. Use `mixed` with a nonnegative integer `promptSeed` to select one
+of those five wordings by seed modulo five. The selection stays fixed for the
+episode and consumes no simulation randomness. The original wording remains
+the default. Hosted evaluation also accepts `heldout-briefing` and
+`heldout-reference`; training rejects them.
+
+Board-specific rules, legal moves, turn caps, scoring, private notes, operator
+strategy, and reply format remain unchanged. Private training evidence records
+the wording bank and exact message hashes, including actual retry messages.
+External-player frames expose selected messages outside the unchanged board
+observation. The numeric bridge requires canonical wording; append `--language`
+to use the selected hosted rules for text collection.
