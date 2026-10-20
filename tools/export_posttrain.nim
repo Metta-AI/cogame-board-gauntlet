@@ -24,10 +24,13 @@ when isMainModule:
   setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   var runs = newJArray()
+  var wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + episodes:
     var selection = initialSelection
+    let partition = ord(seed mod 5 == 0)
     if selection.variant == pvMixed:
-      selection.seed += seed - firstSeed
+      selection.seed += wordingCounts[partition]
+      inc wordingCounts[partition]
     var config = defaultGameConfig()
     config.seed = seed
     let tacticianSeat = seed mod 2

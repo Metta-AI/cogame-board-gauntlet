@@ -78,7 +78,9 @@ permits five wordings, including canonical. Held-out selections require an expli
 The numeric interface preserves its canonical messages and action catalog.
 
 The source exporter accepts `OUTPUT EPISODES FIRST_SEED PROMPT_VARIANT PROMPT_SEED`.
-Mixed exports advance the prompt seed per episode and record each selection.
+Mixed exports advance the prompt seed separately within each source split and record each selection.
+This prevents every-fifth-seed validation from removing a wording from the source training directory.
+The shared importer assigns its own whole-family splits; check wording coverage in its final training rows too.
 Collect separate private directories with identical scenario seeds for each
 wording. Episode identities include the wording; scenario-family identities
 and train/validation assignment depend only on the scenario seed. Keep the
