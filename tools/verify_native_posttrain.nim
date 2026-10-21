@@ -50,10 +50,9 @@ for eventIndex, event in events:
     var expectedMetadata = newJArray()
     var selectedFound = false
     for attemptIndex, attempt in capture["attempts"].getElems():
-      if attempt["origin"].getStr() in ["model", "teacher"]:
-        expectedMetadata.add(%*{"attempt_id": attempt["attempt_id"],
-          "prompt_template": selection.promptMetadata(attempt["prompt"][0]["content"].getStr(),
-            attempt["prompt"][1]["content"].getStr())})
+      expectedMetadata.add(%*{"attempt_id": attempt["attempt_id"],
+        "prompt_template": selection.promptMetadata(attempt["prompt"][0]["content"].getStr(),
+          attempt["prompt"][1]["content"].getStr())})
       if attempt["attempt_id"] == capture["selected_attempt_id"]:
         doAssert attempt["accepted"].getBool()
         selectedFound = true
