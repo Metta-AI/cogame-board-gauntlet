@@ -458,3 +458,11 @@ suite "replay bytes":
         payload["config"]["game"].getStr()
       check payload["results"]["rotated"].getBool()
       discard liveFrames(sim)
+
+
+suite "private notes":
+  test "public events omit notes while stored events preserve them":
+    var event = GameEvent(kind: evMove, notes: "private-note-sentinel", say: "public line")
+    check event.eventToJson()["notes"].getStr() == "private-note-sentinel"
+    check "notes" notin event.publicEventJson()
+    check event.publicEventJson()["say"].getStr() == "public line"

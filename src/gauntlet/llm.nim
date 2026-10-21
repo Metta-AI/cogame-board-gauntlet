@@ -16,11 +16,11 @@
 ## offline certification still completes - this fallback is load-bearing.
 
 import
-  std/[json, options, os, strutils],
-  bitworld/decision_trajectory,
+  std/[json, options, os, strutils, times],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
-  sim
+  sim, prompts
 from games/connect_four import nil
 from games/breakthrough import nil
 from games/hex import nil
@@ -37,13 +37,13 @@ const
 
 type
   Decision* = object
-    nativeAttempts*: seq[DecisionAttempt]
     move*: string
     say*: string
     notes*: string
     scripted*: bool   ## decided by a baseline rather than by the model
     fellBack*: bool   ## an LLM decision was attempted and failed
     illegal*: bool    ## the reply parsed but did not name a legal move
+    nativeAttempts*: seq[DecisionAttempt]
 
   Baseline* = enum
     blTactician = "tactician"
@@ -468,29 +468,9 @@ proc rulesText*(game: Game, size: int): string =
     "- You win the moment your pawn reaches your goal rank.\n"
   of gRotate: ""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  let me = sim.names[seat]
-  result.add("You are " & me & ", a cog playing " &
-    ($sim.config.game).toUpperAscii() & " against one other cog on the " &
-    "Board Gauntlet. You play " & colourOf(seat) & ".\n\n")
-  result.add("This is a PERFECT-INFORMATION, zero-sum, two-player board " &
-    "game. You are shown the entire position, the entire move history and " &
-    "the entire legal-move set every ply. Nothing about the board is " &
-    "hidden from you and nothing about it is hidden from your opponent; " &
-    "the only thing you cannot see is what they are thinking.\n\n")
-  result.add("RULES\n" & rulesText(sim.config.game, sim.config.size))
-  result.add("- Seats alternate strictly, one move each; there is no " &
-    "pass and no double move.\n")
-  result.add("- If " & $sim.config.maxPlies & " plies are played with no " &
-    "terminal position, the game is adjudicated on the position " &
-    "heuristic you are shown each ply; the wall clock can stop it the " &
-    "same way.\n\n")
-  result.add("SCORING: +1 for a win, 0 for a draw, -1 for a loss. " &
-    "Nothing else is scored.\n\n")
-  result.add("OUTPUT FORMAT: reply with ONLY one JSON object, nothing " &
-    "else - no analysis, no explanation, no markdown fences, no text " &
-    "before or after the object. Your reply must begin with the " &
-    "character { and end with }.")
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
+  selection.systemPrompt(sim.names[seat], ($sim.config.game).toUpperAscii(),
+    colourOf(seat), rulesText(sim.config.game, sim.config.size), sim.config.maxPlies)
 
 proc userPrompt*(sim: Sim, seat: int, operatorPrompt: string): string =
   result.add("Ply " & $(sim.plies + 1) & " of " & $sim.config.maxPlies &
@@ -536,13 +516,17 @@ proc extractJsonObject*(text: string): JsonNode =
       cleanText(text, MaxErrorLen))
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, system, user: string, slot: int, evidence: var DecisionAttempt): string =
+proc completeText(client: LlmClient, system, user: string, slot: int,
+    evidence: var DecisionAttempt): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
-    "temperature": 0,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
+  let temperature = parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "1"))
+  if not (temperature >= 0 and temperature <= 1):
+    raise newException(ValueError, "COWORLD_LLM_TEMPERATURE must be finite and between 0 and 1")
+  body["temperature"] = %temperature
   var headers: HttpHeaders
   headers["content-type"] = "application/json"
   if client.transport == ltSidecar and slot >= 0:
@@ -566,12 +550,25 @@ proc completeText(client: LlmClient, system, user: string, slot: int, evidence: 
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
-  captureInferenceRequest(evidence, body, system, user)
+  evidence.request = copy(body)
+  evidence.model = some(client.model)
+  evidence.decoder = %*{"temperature": (if body.hasKey("temperature"): body["temperature"] else: newJNull()),
+    "max_tokens": client.maxOutputTokens, "timeout_ms": client.timeoutSeconds * 1000}
+  let started = epochTime()
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
-  captureInferenceResponse(evidence, response.body, response.code,
-    response.headers["x-softmax-llm-call-id"], response.headers["x-coworld-checkpoint-sha256"],
-    response.headers["x-coworld-tokenizer-sha256"], response.headers["x-coworld-chat-template-sha256"],
-    client.timeoutSeconds, 2)
+  evidence.latencyMs = some((epochTime() - started) * 1000)
+  evidence.rawResponse = %response.body
+  for (header, field) in [
+      ("x-softmax-llm-call-id", "call"),
+      ("x-coworld-checkpoint-sha256", "model"),
+      ("x-coworld-tokenizer-sha256", "tokenizer"),
+      ("x-coworld-chat-template-sha256", "template")]:
+    if response.headers[header].len > 0:
+      case field
+      of "call": evidence.platformCallId = some(response.headers[header])
+      of "model": evidence.modelIdentity = some(response.headers[header])
+      of "tokenizer": evidence.tokenizerIdentity = some(response.headers[header])
+      of "template": evidence.chatTemplateSha256 = some(response.headers[header])
   if response.code == 401 or response.code == 403:
     let detail = response.body[0 .. min(response.body.high, 400)]
     if "Model access is denied" in response.body and
@@ -589,6 +586,24 @@ proc completeText(client: LlmClient, system, user: string, slot: int, evidence: 
     raise newException(GauntletError, "anthropic error " & $response.code &
       ": " & response.body[0 .. min(response.body.high, 300)])
   let payload = parseJson(response.body)
+  evidence.model = some(payload["model"].getStr())
+  evidence.rawResponse = payload
+  evidence.stopReason = some(payload["stop_reason"].getStr())
+  evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
+  evidence.outputTokens = some(payload["usage"]["output_tokens"].getInt())
+  if payload.hasKey("sampling_evidence") and payload["sampling_evidence"].kind != JNull:
+    let sampled = payload["sampling_evidence"]
+    var promptTokens, completionTokens: seq[int]
+    var probabilities: seq[float]
+    for token in sampled["prompt_token_ids"]: promptTokens.add(token.getInt())
+    for token in sampled["completion_token_ids"]: completionTokens.add(token.getInt())
+    if sampled["behavior_log_probs"].kind != JNull:
+      for probability in sampled["behavior_log_probs"]: probabilities.add(probability.getFloat())
+    evidence.promptTokenIds = some(promptTokens)
+    evidence.sampledTokenIds = some(completionTokens)
+    if sampled["behavior_log_probs"].kind != JNull:
+      evidence.behaviorLogprobs = some(probabilities)
+    evidence.stopReason = some(sampled["stop_reason"].getStr())
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(GauntletError, "anthropic refusal")
   for contentBlock in payload["content"]:
@@ -613,48 +628,53 @@ proc parseReply*(sim: Sim, payload: JsonNode): Decision =
       $sim.config.game & " move")
 
 proc decide*(client: LlmClient, sim: Sim, operatorPrompt: string,
-    baseline: string): Decision =
+    baseline: string, selection: PromptSelection): Decision =
   ## One decision for the seat to move. NEVER raises: every failure falls
   ## back to `tactician`, so the episode always advances.
   if baseline.len > 0:
     return Decision(move: scriptedMove(sim, parseBaseline(baseline)),
       scripted: true)
   if client.isNil or client.disabled:
-    return Decision(move: scriptedMove(sim, blTactician), scripted: true, fellBack: true)
+    return Decision(move: scriptedMove(sim, blTactician), fellBack: true)
   let seat = sim.mover
-  let system = systemPrompt(sim, seat)
+  let system = systemPrompt(sim, seat, selection)
   var illegal = false
-  var retained: seq[DecisionAttempt]
   for attempt in 0 .. 1:
-    var evidence = newDecisionAttempt("attempt-" & $attempt, client.model, aoModel)
-    var raw = ""
     var user = sim.userPrompt(seat, operatorPrompt)
     if attempt > 0:
       user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
         "the requested JSON object; `move` must be exactly one of the " &
         "strings in this list: " & sim.legalMoves().join(" "))
+    var evidence = newDecisionAttempt("ply-" & $sim.plies & "-attempt-" & $attempt,
+      client.model, aoModel)
+    evidence.prompt = %*[{"role": "system", "content": system},
+      {"role": "user", "content": user}]
+    var text = ""
     try:
-      raw = client.completeText(system, user, seat, evidence)
-      var decision = sim.parseReply(extractJsonObject(raw))
+      text = client.completeText(system, user, seat, evidence)
+      var decision = sim.parseReply(extractJsonObject(text))
       ## Reject an illegal move HERE so the retry carries the printed set,
       ## computed by the same predicate the validator applies.
       var probe = sim
       probe.applyMove(decision.move, "", "", false, false)
-      evidence.response = %raw
+      evidence.response = %text
+      evidence.parsedAction = %*{"move": decision.move, "say": decision.say, "notes": decision.notes}
       evidence.accepted = true
-      decision.nativeAttempts = retained & @[evidence]
+      result.nativeAttempts.add(evidence)
+      decision.nativeAttempts = result.nativeAttempts
       return decision
     except CatchableError as error:
-      evidence.response = %raw
+      evidence.response = %text
       evidence.rejectionReason = some(error.msg)
-      retained.add(evidence)
+      result.nativeAttempts.add(evidence)
       if "is not a legal" in error.msg or "does not name a" in error.msg:
         illegal = true
-      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt,
-        " failed: ", cleanText(error.msg, MaxErrorLen)
+      echo "board-gauntlet llm: seat ", seat, " attempt ", attempt, " failed"
       if client.disabled:
         break
   echo "board-gauntlet llm: seat ", seat, " falling back to the tactician ",
     "baseline"
-  Decision(move: scriptedMove(sim, blTactician), scripted: false,
-    fellBack: true, illegal: illegal, nativeAttempts: retained)
+  result.move = scriptedMove(sim, blTactician)
+  result.scripted = false
+  result.fellBack = true
+  result.illegal = illegal

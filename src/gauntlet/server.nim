@@ -22,12 +22,14 @@
 
 import
   std/[json, locks, options, os, sets, strutils, tables, times],
-  bitworld/decision_trajectory,
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   mummy,
+  prompts,
   mummy/routers,
   llm,
+  training,
   observation,
   sim
 
@@ -44,8 +46,8 @@ const
 
 type
   GameState = object
-    trajectory: Option[DecisionTrajectory]
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: seq[string]
     baselines: seq[string]      ## "" = LLM seat, else the baseline's name
@@ -54,12 +56,12 @@ type
     decisionId: int
     pendingSeat: int
     pendingMove: string
-    pendingAttempts: seq[DecisionAttempt]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
+    trajectory: Option[DecisionTrajectory]
 
 var
   stateLock: Lock
@@ -93,7 +95,7 @@ proc policyNamesJson(gs: GameState): JsonNode =
 proc snapshotJson(gs: GameState): JsonNode =
   var events = newJArray()
   for event in gs.sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   var connected = newJArray()
   for slot in 0 ..< gs.config.tokens.len:
     connected.add(%gs.playerSockets.hasKey(slot))
@@ -172,7 +174,7 @@ proc replayPayload(gs: GameState, results: JsonNode): string =
     names.add(%name)
   var events = newJArray()
   for event in gs.sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   $ %*{
     "protocol": ReplayProtocol,
     "names": names,
@@ -196,6 +198,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if state.trajectory.isSome:
+      var outcomes = newJObject()
+      for seat in 0 ..< results["scores"].len:
+        outcomes[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.get().finish(
+        if results["reason"].getStr() == "complete": esCompleted else: esTruncated,
+        results, outcomes)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -220,12 +230,6 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       final["slot"] = %slot
       socket.send($final)
     state.broadcastLocked()
-
-  if state.trajectory.isSome:
-    state.trajectory.get().finish(
-      (if state.sim.reason == "deadline": esTruncated else: esCompleted),
-      results, results["scores"])
-    state.trajectory.get().writeEventsToUri(getEnv("COGAME_SAVE_TRAJECTORY_URI"))
 
   sleep(500)
   echo "board-gauntlet: writing results and replay"
@@ -330,11 +334,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           inc state.decisionId
           state.pendingSeat = mover
           state.pendingMove = ""
-          state.pendingAttempts = @[]
           state.playerSockets[mover].send($ %*{
             "type": "observation",
             "id": state.decisionId,
-            "observation": state.sim.playerObservation(mover)
+            "observation": state.sim.playerObservation(mover),
+            "messages": [
+              {"role": "system", "content": state.sim.systemPrompt(mover, state.selection)},
+              {"role": "user", "content": state.sim.userPrompt(mover, seatPrompt)}],
+            "prompt_template": state.selection.promptMetadata(
+              state.sim.systemPrompt(mover, state.selection), state.sim.userPrompt(mover, seatPrompt))
           })
         let replyDeadline = epochTime() + config.llmTimeoutSeconds.float
         var move = ""
@@ -347,17 +355,13 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         withLock stateLock:
           state.pendingSeat = -1
           state.pendingMove = ""
-          if move.len > 0:
-            state.sim.applyMove(move, "", "", false, false)
-          else:
-            state.sim.applyMove(tacticianMove(state.sim), "", "", false, true)
+          let proposed = Decision(move: move)
+          let applied = if move.len > 0: proposed
+            else: Decision(move: tacticianMove(state.sim), fellBack: true)
+          state.sim.applyMove(applied.move, "", "", false, applied.fellBack)
           if state.trajectory.isSome:
-            state.trajectory.get().recordExecutedDecision($simCopy.plies, $mover,
-              config.players[mover].name, %*{"view": simCopy.playerObservation(mover), "operator_prompt": seatPrompt, "control": "external"},
-              %*{"move": state.sim.lastMove}, state.pendingAttempts,
-              (if move.len == 0: aoFallback
-               elif state.pendingAttempts.len > 0: aoModel else: aoUnknown),
-              terminal = state.sim.done)
+            state.trajectory.get().recordAppliedDecision(simCopy, proposed,
+              applied, seatPrompt, "external-gauntlet", state.sim.done, state.selection)
           echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
             " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
             (epochTime() - gameStart).int, "s"
@@ -378,33 +382,22 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
-      let decision = client.decide(simCopy, seatPrompt, seatBaseline)
+      let decision = client.decide(simCopy, seatPrompt, seatBaseline, state.selection)
+      var applied = decision
 
       withLock stateLock:
         if decision.illegal:
           inc state.sim.illegalReplies[mover]
-        var engineRejected = false
         try:
           state.sim.applyMove(decision.move, decision.say, decision.notes,
             decision.scripted, decision.fellBack)
         except GauntletError as error:
-          echo "board-gauntlet: move rejected (",
-            cleanText(error.msg, MaxErrorLen),
-            "); falling back to the tactician baseline"
-          engineRejected = true
-          let fallback = tacticianMove(state.sim)
-          state.sim.applyMove(fallback, "", "", false, true)
+          echo "board-gauntlet: move rejected; falling back to the tactician baseline"
+          applied = Decision(move: tacticianMove(state.sim), fellBack: true)
+          state.sim.applyMove(applied.move, "", "", false, true)
         if state.trajectory.isSome:
-          let origin =
-            if engineRejected or decision.fellBack: aoFallback
-            elif decision.nativeAttempts.len > 0: aoModel
-            else: aoTeacher
-          state.trajectory.get().recordExecutedDecision($simCopy.plies, $mover,
-            config.players[mover].name, %*{"view": simCopy.playerObservation(mover), "operator_prompt": seatPrompt, "control": "internal"},
-            %*{"move": state.sim.lastMove, "say": (if engineRejected: "" else: decision.say),
-              "notes": (if engineRejected: "" else: decision.notes)},
-            decision.nativeAttempts, origin, systemPrompt(simCopy, mover),
-            userPrompt(simCopy, mover, seatPrompt), state.sim.done)
+          state.trajectory.get().recordAppliedDecision(simCopy, decision,
+            applied, seatPrompt, "scripted-" & seatBaseline, state.sim.done, state.selection)
         echo "board-gauntlet: ply ", state.sim.plies, "/", config.maxPlies,
           " ", moveText(state.sim, mover, state.sim.lastMove), " at ",
           (epochTime() - gameStart).int, "s"
@@ -569,15 +562,11 @@ proc websocketHandler(
             if state.external[slot] and state.pendingSeat == slot and
                 state.decisionId == id and state.pendingMove.len == 0:
               if state.sim.isLegalMove(move):
-                if payload.hasKey("attempts"):
-                  for attempt in payload["attempts"]:
-                    state.pendingAttempts.add(readAttemptEvidence(attempt))
                 state.pendingMove = move
               else:
                 inc state.sim.illegalReplies[slot]
       except CatchableError as error:
-        echo "board-gauntlet: ignoring bad player frame: ",
-          cleanText(error.msg, MaxErrorLen)
+        echo "board-gauntlet: rejected player frame for seat ", slot
     of ErrorEvent:
       discard
     of CloseEvent:
@@ -646,7 +635,7 @@ proc runReplayServer*(runtimeConfig: RuntimeConfig) =
   replayPayloadGlobal = $enriched
 
   let router = buildRouter(replayMode = true)
-  gameServer = newServer(router, websocketHandler)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4)
   echo "board-gauntlet: replay mode on ", runtimeConfig.host, ":",
     runtimeConfig.port
   gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
@@ -655,17 +644,19 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(GauntletError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(if runtimeConfig.config.len > 0:
+    parseJson(runtimeConfig.config) else: newJObject())
   state.sim = initSim(config)
-  if getEnv("COGAME_SAVE_TRAJECTORY_URI").len > 0:
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
     state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
-      $config.seed, "gauntlet", getEnv("COWORLD_GAME_VERSION"),
-      getEnv("COWORLD_SOURCE_REVISION")))
+      "gauntlet-" & $config.seed, "board-gauntlet",
+      getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.baselines = newSeq[string](config.players.len)
   state.pendingSeat = -1
 
   let router = buildRouter(replayMode = false)
-  gameServer = newServer(router, websocketHandler)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4)
   createThread(gameThread, runGame, runtimeConfig)
   echo "board-gauntlet: serving on ", runtimeConfig.host, ":",
     runtimeConfig.port

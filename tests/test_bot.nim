@@ -8,6 +8,7 @@
 import std/[random, strutils, times, unittest]
 import gauntlet/sim
 import gauntlet/llm
+import gauntlet/prompts
 
 const AllGames = [gConnectFour, gBreakthrough, gHex, gQuoridor]
 
@@ -51,7 +52,7 @@ suite "baseline orders":
             else:
               ## `decide` with a named baseline never touches the LLM
               ## client, so a nil client is the right thing to pass here.
-              let decision = decide(nil, sim, "", $baseline)
+              let decision = decide(nil, sim, "", $baseline, PromptSelection())
               check decision.scripted
               check not decision.fellBack
               ## A baseline NEVER produces spectator or private text.
