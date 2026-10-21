@@ -28,6 +28,7 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, before: Sim,
     elif attempts[index].accepted:
       selected = some(attempts[index].attemptId)
   let view = before.playerObservation(seat)
+  view["operator_prompt"] = %operatorPrompt
   view["prompt_template"] = selection.promptMetadata(before.systemPrompt(seat, selection),
     before.userPrompt(seat, operatorPrompt))
   var promptAttempts = newJArray()

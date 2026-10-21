@@ -506,7 +506,7 @@ proc userPrompt*(sim: Sim, seat: int, operatorPrompt: string): string =
 
 # ---- Anthropic / Bedrock transport ------------------------------------------
 
-proc extractJsonObject(text: string): JsonNode =
+proc extractJsonObject*(text: string): JsonNode =
   ## Pulls the first {...} object out of a model response, tolerating
   ## fences and trailing prose.
   let start = text.find('{')
