@@ -16,7 +16,22 @@ doAssert outcome == replay["results"]
 let config = configFromReplay(replay)
 doAssert summary["seed_family"].getStr() == "gauntlet-" & $config.seed
 var events: seq[GameEvent]
-for event in replay["events"]: events.add(eventFromJson(event))
+var privateIndex = 0
+for node in replay["events"]:
+  var event = eventFromJson(node)
+  if event.kind == evMove:
+    doAssert privateIndex < captures.len - 1
+    let action = captures[privateIndex]["executed_action"]
+    doAssert action["move"].getStr() == event.move
+    doAssert action["say"].getStr() == event.say
+    if node.hasKey("notes"):
+      doAssert action["notes"].getStr() == event.notes
+    # Public replays omit private memory. Rebuild it from the private journal;
+    # the selected response is still checked by the native parser below.
+    event.notes = action["notes"].getStr()
+    inc privateIndex
+  events.add(event)
+doAssert privateIndex == captures.len - 1
 let frames = replayMatch(config, events)
 let fullSchedule = frames[^1].done and frames[^1].reason == "complete"
 doAssert frames[^1].resultsJson()["scores"] == replay["results"]["scores"]

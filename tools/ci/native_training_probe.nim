@@ -38,3 +38,29 @@ trajectory.recordAppliedDecision(before, decision, decision,
   "Exact private operator prompt", "native-fixture", game.done, selection)
 trajectory.finish(esTruncated, game.resultsJson(), %*{})
 echo trajectory.eventsJsonl()
+
+if paramCount() >= 3:
+  let output = paramStr(3)
+  let complete = newDecisionTrajectory("probe", "gauntlet-" & $config.seed,
+    "board-gauntlet", "fixture", "fixture-source")
+  complete.recordAppliedDecision(before, decision, decision,
+    "Exact private operator prompt", "native-fixture", game.done, selection)
+  while not game.done:
+    let previous = game
+    let next = Decision(move: tacticianMove(game), scripted: true)
+    game.applyMove(next.move, next.say, next.notes, next.scripted, next.fellBack)
+    complete.recordAppliedDecision(previous, next, next,
+      "Exact private operator prompt", "scripted-tactician", game.done, selection)
+  complete.finish(esCompleted, game.resultsJson(), %*{})
+  writeFile(output / "trajectory.jsonl", complete.eventsJsonl())
+  var events = newJArray()
+  for event in game.events: events.add(event.publicEventJson())
+  let resolved = game.config
+  writeFile(output / "replay.json", $(%*{
+    "protocol": "gauntlet.replay.v1",
+    "names": game.names,
+    "policyNames": ["fixture-0", "fixture-1"],
+    "config": {"game": $resolved.game, "rotated": resolved.rotated,
+      "size": resolved.size, "walls": resolved.walls, "first": resolved.first,
+      "seed": resolved.seed, "maxPlies": resolved.maxPlies, "sampled": true},
+    "events": events, "results": game.resultsJson()}))

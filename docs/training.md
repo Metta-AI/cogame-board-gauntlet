@@ -124,11 +124,21 @@ python3 tools/export_native_posttrain.py --replay /private/replay.json \
   --episode-id EPISODE_ID
 ```
 
+Public replay events omit private notes. The verifier restores that memory
+from the private journal, then checks it against the selected native response
+and reconstructs every later private observation. Notes stay out of the public
+replay; forged journal memory fails native response/action validation.
+
 The verifier reconstructs observations, selected rule wording, exact model
 requests including retries, applied actions and final scores. Operator prompts
 remain private capture metadata. The report hashes its inputs; a game-log hash
 is provenance, not an independent provider receipt or a model-quality claim.
 The tool does not approve teacher data or import it into a training campaign.
+
+For a verifier-only repair, pass the original full commit SHA with
+`--source-revision`. The tool requires identical `src/` and `nimby.lock` trees
+and reports both the recorded and verifier commits. It never restamps a capture
+or admits a different game engine.
 
 Historical captures retain their original reader and source checkout, including
 `021af601feb17875c87544ff28784d613b1e0c29`. Do not rewrite their source identity or
